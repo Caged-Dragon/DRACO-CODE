@@ -99,6 +99,7 @@
   function setActive(id) {
     const program = state.programs.find((p) => p.id === id);
     if (!program) return;
+    if (!canUseLanguage(program.language)) { openAccountPanel(); showToast('Sign in and add this language to use it.'); return; }
     if (activeProgram && activeProgram.id !== id) activeProgram.code = editor.value;
     activeProgram = program;
     state.activeId = id;
@@ -310,9 +311,11 @@
     progress.textContent = 'Your program is running in an isolated sandbox…';
     output.append(progress);
     try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (accountSession?.access_token) headers.Authorization = `Bearer ${accountSession.access_token}`;
       const response = await fetch(`${BACKEND_URL}/execute`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ language, code, stdin }),
         cache: 'no-store',
         signal: AbortSignal.timeout(52_000)
@@ -347,6 +350,7 @@
   }
 
   function createProgram(language = languageSelect.value) {
+    if (!canUseLanguage(language)) { openAccountPanel(); showToast('Sign in and add this language to unlock it.'); return; }
     if (state.programs.length >= MAX_PROGRAMS) {
       showToast(`You can keep up to ${MAX_PROGRAMS} local programs in this workspace.`);
       return;
@@ -376,6 +380,7 @@
 
   function setLanguage(language) {
     if (!LANGUAGES[language] || !activeProgram || activeProgram.language === language) return;
+    if (!canUseLanguage(language)) { languageSelect.value = activeProgram.language; openAccountPanel(); showToast('Sign in and add this language to unlock it.'); return; }
     if (!window.confirm(`Change this file to ${LANGUAGES[language].label}? Its current source will be kept as-is; it will not be translated.`)) {
       languageSelect.value = activeProgram.language;
       return;
@@ -647,6 +652,7 @@
     }
   });
 
+  initAccount().catch(e => console.error('Draco account initialization failed', e));
   checkBackend();
   registerServiceWorker();
 })();
