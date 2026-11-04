@@ -43,3 +43,7 @@ assert.match(app, /c: \{ label: 'C', extension: '\.c'/);
 assert.match(app, /cpp: \{ label: 'C\+\+', extension: '\.cpp'/);
 
 console.log(`Frontend static smoke passed: ${ids.size} DOM IDs, ${referenced.size} code references, all shell assets present, five language starters, no install/manifest code.`);
+
+assert.ok(existsSync(resolve(root, 'scripts/build.mjs')), 'environment-driven Vercel build script missing');
+const configSource = readFileSync(resolve(root, 'assets/config.js'), 'utf8');
+assert.doesNotMatch(configSource, /sb_publishable_[A-Za-z0-9_-]{20,}/, 'public Supabase key should come from Vercel env at build time');

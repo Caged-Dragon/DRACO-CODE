@@ -22,7 +22,7 @@ Draco Code is the CAGED DRAGON browser-based compiler for **Python, JavaScript, 
 3. Start the backend from `backend/` with the Vercel development runtime after linking the existing backend project and setting its environment variables; the frontend's localhost-only config points to `http://localhost:8787`.
 4. Do not copy production secrets into source control. Use `backend/.env.example` as a key checklist and supply local values privately.
 
-The browser workspace autosaves drafts in local storage. Code is only sent to the backend when Run is pressed. User source code is not stored in Supabase; the database is used by the backend for run-rate enforcement and execution metadata.
+The browser workspace autosaves drafts in local storage. The frontend Vercel build generates `assets/config.js` from `DRACO_BACKEND_URL`, `SUPABASE_URL`, and `SUPABASE_ANON_KEY`; set those public configuration values in the frontend project environment. The backend uses the same Supabase URL and publishable/anon key plus its private `CODE_BACKEND_SHARED_SECRET` and `CODE_RATE_LIMIT_SECRET`. Never expose the backend secrets or a Supabase secret/service-role key to the browser. Code is only sent to the backend when Run is pressed. User source code is not stored in Supabase; the database is used by the backend for run-rate enforcement and execution metadata.
 
 ## Testing
 
@@ -43,7 +43,7 @@ Use the two existing Vercel projects connected to `Caged-Dragon/DRACO-CODE`:
 - Frontend project root: `frontend/`
 - Backend project root: `backend/`
 
-The backend production environment must contain the keys listed in `backend/.env.example`. Keep `CODE_BACKEND_SHARED_SECRET`, `CODE_RATE_LIMIT_SECRET`, and all Supabase credentials private to the backend project. The frontend only calls the fixed public API URL in `frontend/assets/config.js`.
+The backend production environment must contain the keys listed in `backend/.env.example`. Keep `CODE_BACKEND_SHARED_SECRET`, `CODE_RATE_LIMIT_SECRET`, and all Supabase credentials private to the backend project. The frontend API URL and Supabase browser configuration are generated at build time from Vercel environment variables. The frontend and backend projects should both have the same `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `DRACO_BACKEND_URL` values; only the frontend embeds these public values. Keep `CODE_BACKEND_SHARED_SECRET` and `CODE_RATE_LIMIT_SECRET` only in the backend project.
 
 The existing database already contains the `code_consume_run` and `code_record_execution` RPC functions and the `code_rate_limit_windows` / `code_execution_events` tables. Do not recreate the database or apply destructive migrations.
 

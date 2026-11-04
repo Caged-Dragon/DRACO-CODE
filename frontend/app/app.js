@@ -4,9 +4,11 @@
   const BACKEND_URL = String(window.DRACOCODE_CONFIG?.BACKEND_URL || window.DRACOSKILL_CONFIG?.BACKEND_URL || 'https://draco-code-backend.vercel.app').replace(/\/$/, '');
   const STORAGE_KEY = 'draco-code-workspace-v1';
   const MAX_PROGRAMS = 30;
-  const SUPABASE_URL = 'https://gbeurqibcfvquacasofq.supabase.co';
-  const SUPABASE_KEY = 'sb_publishable_nsSCuh8LeO3ug4CjHbeZuw_O-d4IMCM';
-  const supabaseClient = window.supabase?.createClient ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }) : null;
+  const SUPABASE_URL = String(window.DRACOCODE_CONFIG?.SUPABASE_URL || '').trim();
+  const SUPABASE_KEY = String(window.DRACOCODE_CONFIG?.SUPABASE_ANON_KEY || '').trim();
+  const supabaseClient = SUPABASE_URL && SUPABASE_KEY && window.supabase?.createClient
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } })
+    : null;
   let accountSession = null, accountUser = null, installedLanguages = new Set(), installedPackages = [], accountBusy = false;
   const LANGUAGES = {
     python: { label: 'Python', extension: '.py', file: 'main.py', dot: 'python', starter: 'def main():\n    print("Hello from Draco Code")\n\nif __name__ == "__main__":\n    main()\n' },

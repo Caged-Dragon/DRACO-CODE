@@ -154,8 +154,16 @@ export class RunSession {
 const missingTool = (r) => r.exitCode === 127 && /not found/i.test(r.stderr || '');
 
 export function setupUrl() {
-  const host = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
-  return host ? `https://${host}/setup` : '<your backend address>/setup';
+  const configured = String(process.env.DRACO_BACKEND_URL || '').trim();
+  const deploymentHost = String(process.env.VERCEL_URL || '').trim();
+  const host = configured || (deploymentHost ? `https://${deploymentHost}` : 'https://draco-code-backend.vercel.app');
+  try {
+    const url = new URL(host.includes('://') ? host : `https://${host}`);
+    if (url.protocol !== 'https:' || url.username || url.password) throw new Error('Invalid backend URL');
+    return `${url.origin}/setup`;
+  } catch {
+    return 'https://draco-code-backend.vercel.app/setup';
+  }
 }
 
 function missingMessage(language) {
