@@ -529,7 +529,7 @@
     const language=$('package-language').value,name=$('package-name').value.trim(),version=$('package-version').value.trim();
     if(!name){showToast('Enter a package name.');return;}if(!canUseLanguage(language)){showToast('Add this language to your account first.');return;}
     const validName = language==='python' ? /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/.test(name)
-      : language==='javascript' ? /^(?:@[a-z0-9][a-z0-9._-]{0,49}\\/)?[a-z0-9][a-z0-9._-]{0,99}$/i.test(name)
+      : language==='javascript' ? /^(?:@[a-z0-9][a-z0-9._-]{0,49}\/)?[a-z0-9][a-z0-9._-]{0,99}$/i.test(name)
       : language==='java' ? /^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$/.test(name)
       : language==='c' ? ['libsqlite3-dev','libssl-dev','libcurl4-openssl-dev'].includes(name)
       : ['nlohmann-json3-dev','libboost-dev','libeigen3-dev','libfmt-dev'].includes(name);
