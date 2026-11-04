@@ -1,4 +1,4 @@
-// DracoSkill (Vercel) — runs ONE program in a fresh Vercel Sandbox microVM.
+// Draco Code (Vercel) — runs ONE program in a fresh Vercel Sandbox microVM.
 //
 // Every run gets its own microVM with all outbound network blocked ('deny-all'),
 // is never persisted, and is stopped when finished. That is stronger isolation
