@@ -17,7 +17,7 @@ Draco Code is the CAGED DRAGON browser-based compiler for **Python, JavaScript, 
 
 ## Local development
 
-1. Use Node.js 20 or newer.
+1. Use Node.js 24.x (the Vercel projects are configured for Node 24).
 2. Start the frontend from `frontend/` with a static file server (for example `npx serve .`).
 3. Start the backend from `backend/` with the Vercel development runtime after linking the existing backend project and setting its environment variables; the frontend's localhost-only config points to `http://localhost:8787`.
 4. Do not copy production secrets into source control. Use `backend/.env.example` as a key checklist and supply local values privately.
