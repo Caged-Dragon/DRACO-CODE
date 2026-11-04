@@ -77,6 +77,7 @@ export class RunSession {
       const allowed=language==='c'?new Set(['libsqlite3-dev','libssl-dev','libcurl4-openssl-dev']):new Set(['nlohmann-json3-dev','libboost-dev','libeigen3-dev','libfmt-dev']);
       if(specs.some(p=>!allowed.has(p.name)))throw new Error('This C/C++ package is not in the supported system-library catalogue.');
       await sb.update({networkPolicy:{allow:['archive.ubuntu.com','security.ubuntu.com','ports.ubuntu.com','packages.ubuntu.com']}});
+      await sb.runCommand({cmd:'sed',args:['-i','s|http://|https://|g','/etc/apt/sources.list.d/ubuntu.sources'],sudo:true});
       const update=await sb.runCommand({cmd:'apt-get',args:['update','-qq'],sudo:true});if(update.exitCode!==0)throw new Error('Could not refresh the C/C++ package catalogue.');
       const install=await sb.runCommand({cmd:'apt-get',args:['install','-y','--no-install-recommends',...specs.map(p=>p.name)],sudo:true});if(install.exitCode!==0)throw new Error('C/C++ package installation failed.');
     }
