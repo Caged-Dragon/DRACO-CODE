@@ -82,16 +82,36 @@ function send(res, status, body, headers = {}) {
   res.end(JSON.stringify(body));
 }
 
-function supabaseConfig() {
+function supabaseConfigStatus() {
   const url = String(process.env.SUPABASE_URL || '').trim();
   const anonKey = String(process.env.SUPABASE_ANON_KEY || '').trim();
   const backendSecret = String(process.env.CODE_BACKEND_SHARED_SECRET || '').trim();
   const fingerprintSecret = String(process.env.CODE_RATE_LIMIT_SECRET || '').trim();
   let parsed;
   try { parsed = new URL(url); } catch { parsed = null; }
-  if (!parsed || parsed.protocol !== 'https:' || parsed.hostname !== EXPECTED_SUPABASE_HOST) return null;
-  if (!anonKey || backendSecret.length < 32 || fingerprintSecret.length < 32) return null;
-  return { url: parsed.origin, anonKey, backendSecret, fingerprintSecret };
+  const urlMatchesProject = !!parsed && parsed.protocol === 'https:' && parsed.hostname === EXPECTED_SUPABASE_HOST;
+  return {
+    ready: urlMatchesProject && !!anonKey && backendSecret.length >= 32 && fingerprintSecret.length >= 32,
+    urlPresent: !!url,
+    urlMatchesProject,
+    anonKeyPresent: !!anonKey,
+    backendSecretPresent: !!backendSecret,
+    backendSecretLengthValid: backendSecret.length >= 32,
+    rateLimitSecretPresent: !!fingerprintSecret,
+    rateLimitSecretLengthValid: fingerprintSecret.length >= 32
+  };
+}
+
+function supabaseConfig() {
+  const status = supabaseConfigStatus();
+  if (!status.ready) return null;
+  const parsed = new URL(String(process.env.SUPABASE_URL).trim());
+  return {
+    url: parsed.origin,
+    anonKey: String(process.env.SUPABASE_ANON_KEY).trim(),
+    backendSecret: String(process.env.CODE_BACKEND_SHARED_SECRET).trim(),
+    fingerprintSecret: String(process.env.CODE_RATE_LIMIT_SECRET).trim()
+  };
 }
 
 async function callSupabaseRpc(name, args, config) {
@@ -183,9 +203,11 @@ export default async function handler(req, res) {
       return send(res, 200, await startSetup());
     }
     if (req.method === 'GET' && path === '/health') {
+      const databaseConfig = supabaseConfigStatus();
       return send(res, 200, {
         status: 'ok', service: 'draco-code-execution', backend: 'vercel-sandbox',
-        databaseConfigured: !!supabaseConfig()
+        databaseConfigured: databaseConfig.ready,
+        databaseConfig
       });
     }
     if (req.method === 'GET' && path === '/sandboxes') {
