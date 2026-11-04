@@ -7,8 +7,11 @@ create table if not exists public.draco_user_languages (
 alter table public.draco_user_languages enable row level security;
 revoke all on public.draco_user_languages from anon;
 grant select, insert, delete on public.draco_user_languages to authenticated;
+drop policy if exists "Users read their Draco languages" on public.draco_user_languages;
 create policy "Users read their Draco languages" on public.draco_user_languages for select to authenticated using ((select auth.uid()) = user_id);
+drop policy if exists "Users add their Draco languages" on public.draco_user_languages;
 create policy "Users add their Draco languages" on public.draco_user_languages for insert to authenticated with check ((select auth.uid()) = user_id);
+drop policy if exists "Users remove their Draco languages" on public.draco_user_languages;
 create policy "Users remove their Draco languages" on public.draco_user_languages for delete to authenticated using ((select auth.uid()) = user_id);
 
 create table if not exists public.draco_user_packages (
@@ -22,7 +25,10 @@ create table if not exists public.draco_user_packages (
 alter table public.draco_user_packages enable row level security;
 revoke all on public.draco_user_packages from anon;
 grant select, insert, delete on public.draco_user_packages to authenticated;
+drop policy if exists "Users read their Draco packages" on public.draco_user_packages;
 create policy "Users read their Draco packages" on public.draco_user_packages for select to authenticated using ((select auth.uid()) = user_id);
+drop policy if exists "Users add their Draco packages" on public.draco_user_packages;
 create policy "Users add their Draco packages" on public.draco_user_packages for insert to authenticated with check ((select auth.uid()) = user_id);
+drop policy if exists "Users remove their Draco packages" on public.draco_user_packages;
 create policy "Users remove their Draco packages" on public.draco_user_packages for delete to authenticated using ((select auth.uid()) = user_id);
 create index if not exists draco_user_packages_owner_language_idx on public.draco_user_packages(user_id, language);

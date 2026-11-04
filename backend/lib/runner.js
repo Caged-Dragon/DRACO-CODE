@@ -46,6 +46,7 @@ export class RunSession {
     this.language = language;
     this.code = code;
     this.factory = factory;
+    this.packages = Array.isArray(packages) ? packages : [];
     this.sb = null;
     const f = snippetFile(language, code);
     this.file = f.file;

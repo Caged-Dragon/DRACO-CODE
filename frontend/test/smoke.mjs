@@ -25,6 +25,11 @@ for (const asset of ['assets/design.css', 'assets/theme.js', 'assets/highlight.j
   await access(path.join(root, asset));
 }
 assert.match(config, /https:\/\/draco-code-backend\.vercel\.app/);
+assert.match(html, /id="account-menu-button"/);
+assert.match(html, /id="account-panel"/);
+assert.match(app, /function canUseLanguage/);
+assert.match(app, /initAccount\(\)/);
+assert.match(app, /headers.Authorization/);
 assert.match(config, /http:\/\/localhost:8787/);
 for (const pwaAsset of ['apple-touch-icon.png', 'icon-192.png', 'icon-512.png', 'maskable-512.png']) {
   await assert.rejects(access(path.join(root, 'assets/icons', pwaAsset)));
