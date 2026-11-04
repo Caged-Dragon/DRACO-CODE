@@ -120,7 +120,6 @@ async function callSupabaseRpc(name, args, config) {
     method: 'POST',
     headers: {
       apikey: config.anonKey,
-      Authorization: `Bearer ${config.anonKey}`,
       'Content-Type': 'application/json',
       Accept: 'application/json'
     },

@@ -285,6 +285,7 @@ await t('production execution consumes the Supabase quota and records execution 
     assert.equal(requests[1].body.p_code_bytes, Buffer.byteLength('print("db-integrated")'));
     assert.equal('code' in requests[1].body, false, 'source code must not be recorded in the analytics table');
     assert.equal(requests[1].options.headers.apikey, 'test-anon-key');
+    assert.equal(requests[1].options.headers.Authorization, undefined, 'publishable API keys must not be sent as bearer JWTs');
   } finally {
     delete globalThis.__DRACO_SUPABASE_FETCH;
     for (const key of keys) { if (prior[key] === undefined) delete process.env[key]; else process.env[key] = prior[key]; }
