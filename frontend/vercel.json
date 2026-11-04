@@ -67,7 +67,7 @@
         },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://draco-code-backend.vercel.app; worker-src 'self'; manifest-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+          "value": "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://draco-code-backend.vercel.app https://draco-code-backend-vercel-git-codex-draco-c-fd6fe0-caged-dragon.vercel.app https://gbeurqibcfvquacasofq.supabase.co wss://gbeurqibcfvquacasofq.supabase.co; worker-src 'self'; manifest-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
         }
       ]
     }

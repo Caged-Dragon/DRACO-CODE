@@ -31,6 +31,12 @@ assert.match(app, /function canUseLanguage/);
 assert.match(app, /initAccount\(\)/);
 assert.match(app, /headers.Authorization/);
 assert.match(config, /http:\/\/localhost:8787/);
+const vercelConfig = JSON.parse(await readFile(path.join(root, 'vercel.json'), 'utf8'));
+const csp = vercelConfig.headers.find((entry) => entry.source === '/(.*)').headers.find((entry) => entry.key === 'Content-Security-Policy').value;
+assert.match(csp, /script-src 'self' https:\/\/cdn\.jsdelivr\.net/);
+assert.match(csp, /https:\/\/gbeurqibcfvquacasofq\.supabase\.co/);
+assert.match(csp, /https:\/\/draco-code-backend-vercel-git-codex-draco-c-fd6fe0-caged-dragon\.vercel\.app/);
+
 for (const pwaAsset of ['apple-touch-icon.png', 'icon-192.png', 'icon-512.png', 'maskable-512.png']) {
   await assert.rejects(access(path.join(root, 'assets/icons', pwaAsset)));
 }
