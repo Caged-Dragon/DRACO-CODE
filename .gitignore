@@ -1,0 +1,20 @@
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Dependencies and deployment state
+node_modules/
+**/node_modules/
+.vercel/
+**/.vercel/
+
+# Local data and OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+__pycache__/
+*.py[cod]

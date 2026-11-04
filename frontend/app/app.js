@@ -1,1231 +1,666 @@
+(function () {
+  'use strict';
 
-  const demoFiles = {
-    'main.py': {
-      lang: 'python',
-      content: `def fibonacci(n):
-    a, b = 0, 1
-    for _ in range(n):
-        yield a
-        a, b = b, a + b
-
-print("First 10 Fibonacci numbers:")
-print(list(fibonacci(10)))
-`
-    },
-    'app.js': {
-      lang: 'javascript',
-      content: `function isPrime(n) {
-  if (n < 2) return false;
-  for (let i = 2; i * i <= n; i++) {
-    if (n % i === 0) return false;
-  }
-  return true;
-}
-
-const primes = [];
-for (let i = 2; i <= 50; i++) {
-  if (isPrime(i)) primes.push(i);
-}
-console.log("Primes up to 50:", primes.join(", "));
-`
-    },
-    'Main.java': {
-      lang: 'java',
-      content: `public class Main {
-    static boolean isPerfect(int n) {
-        int sum = 0;
-        for (int i = 1; i < n; i++) if (n % i == 0) sum += i;
-        return n > 1 && sum == n;
-    }
-
-    public static void main(String[] args) {
-        System.out.print("Perfect numbers up to 10000:");
-        for (int n = 2; n <= 10000; n++) if (isPerfect(n)) System.out.print(" " + n);
-        System.out.println();
-    }
-}
-`
-    },
-    'main.c': {
-      lang: 'c',
-      content: `#include <stdio.h>
-
-int main(void) {
-    printf("Powers of two:");
-    for (int i = 0; i < 10; i++) printf(" %d", 1 << i);
-    printf("\\n");
-    return 0;
-}
-`
-    },
-    'main.cpp': {
-      lang: 'cpp',
-      content: `#include <iostream>
-#include <vector>
-#include <algorithm>
-
-int main() {
-    std::vector<int> v{5, 3, 9, 1, 7};
-    std::sort(v.begin(), v.end());
-    std::cout << "Sorted:";
-    for (int x : v) std::cout << " " << x;
-    std::cout << std::endl;
-    return 0;
-}
-`
-    },
-    'README.md': {
-      lang: 'text',
-      content: `# DracoSkill sample project
-
-Runnable files in five languages: main.py, app.js, Main.java, main.c, main.cpp.
-Each one compiles/runs on the server — nothing is installed on your computer.
-
-Sign in (top right) to save your own projects and to use the Terminal tab,
-where you can install packages (pip, npm, jar, clib) for a project or your
-whole account.
-`
-    }
+  const BACKEND_URL = String(window.DRACOCODE_CONFIG?.BACKEND_URL || window.DRACOSKILL_CONFIG?.BACKEND_URL || 'https://draco-code-backend.vercel.app').replace(/\/$/, '');
+  const STORAGE_KEY = 'draco-code-workspace-v1';
+  const MAX_PROGRAMS = 30;
+  const SUPABASE_URL = String(window.DRACOCODE_CONFIG?.SUPABASE_URL || '').trim();
+  const SUPABASE_KEY = String(window.DRACOCODE_CONFIG?.SUPABASE_ANON_KEY || '').trim();
+  const supabaseClient = SUPABASE_URL && SUPABASE_KEY && window.supabase?.createClient
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } })
+    : null;
+  let accountSession = null, accountUser = null, installedLanguages = new Set(), installedPackages = [], accountBusy = false;
+  const LANGUAGES = {
+    python: { label: 'Python', extension: '.py', file: 'main.py', dot: 'python', starter: 'def main():\n    print("Hello from Draco Code")\n\nif __name__ == "__main__":\n    main()\n' },
+    javascript: { label: 'JavaScript', extension: '.js', file: 'main.js', dot: 'javascript', starter: 'function main() {\n  console.log("Hello from Draco Code");\n}\n\nmain();\n' },
+    java: { label: 'Java', extension: '.java', file: 'Main.java', dot: 'java', starter: 'public class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello from Draco Code");\n    }\n}\n' },
+    c: { label: 'C', extension: '.c', file: 'main.c', dot: 'c', starter: '#include <stdio.h>\n\nint main(void) {\n    printf("Hello from Draco Code\\n");\n    return 0;\n}\n' },
+    cpp: { label: 'C++', extension: '.cpp', file: 'main.cpp', dot: 'cpp', starter: '#include <iostream>\n\nint main() {\n    std::cout << "Hello from Draco Code" << std::endl;\n    return 0;\n}\n' }
   };
 
-  let currentFile = 'main.py';
-  let savedContent = {};      // last content known to be on the server, per file (for auto-save before Run)
-  let backendUrl = (window.DRACOSKILL_CONFIG && window.DRACOSKILL_CONFIG.BACKEND_URL) || '';
-  let authToken = null;
-  let currentUsername = null;
+  const $ = (id) => document.getElementById(id);
+  const editor = $('editor');
+  const runButton = $('run-button');
+  const runLabel = $('run-label');
+  const output = $('console-output');
+  const stateLabel = $('result-state');
+  const connectionChip = $('connection-chip');
+  const connectionLabel = $('connection-label');
+  const languageSelect = $('language-select');
+  let state = loadState();
+  let activeProgram = null;
+  let editorApi = null;
+  let isRunning = false;
+  let saveTimer = null;
+  let toastTimer = null;
+  let lastResult = null;
 
-  let activeFiles = demoFiles;   // whichever file set is currently shown -- demo, or a real project's
-  let currentProjectId = null;   // null while in demo mode
-  let currentProjectName = '';
-  let myProjects = [];
-
-  const editor = document.getElementById('editor');
-  const fname = document.getElementById('editor-fname');
-  const output = document.getElementById('output');
-  const runBtn = document.getElementById('run-btn');
-  const runLabel = document.getElementById('run-label');
-  const connectRow = document.getElementById('connect-row');
-  const saveBtn = document.getElementById('save-btn');
-  const consoleEl = document.getElementById('console');
-  const sbPos = document.getElementById('sb-pos');
-  const sbLang = document.getElementById('sb-lang');
-  const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
-  document.getElementById('run-kbd').textContent = isMac ? '\u2318\u21B5' : 'Ctrl+Enter';
-  runBtn.title = 'Run (' + (isMac ? 'Cmd' : 'Ctrl') + '+Enter)';
-
-  function updateDirty() {
-    const d = document.getElementById('dirty-dot');
-    d.hidden = !(currentProjectId && currentFile && savedContent[currentFile] !== undefined && editor.value !== savedContent[currentFile]);
-  }
-  const edApi = DracoEditor.attach(editor, {
-    lang: 'python',
-    onCursor: (l, c) => { sbPos.textContent = 'Line ' + l + ', column ' + c; },
-    onChange: updateDirty
-  });
-
-  function showEmptyProjectState() {
-    currentFile = null;
-    activeFiles = {};
-    savedContent = {};
-    editor.value = '';
-    fname.textContent = 'No file open';
-    sbLang.textContent = '';
-    document.getElementById('editor-dot').className = 'ft-dot';
-    updateDirty();
-    output.innerHTML = '<span class="hint">Add a file in the panel on the left to start.</span>';
-    connectRow.style.display = 'none';
-    runBtn.style.visibility = 'hidden';
-    renderFileTree();
+  function uid() {
+    if (window.crypto?.randomUUID) return crypto.randomUUID();
+    return 'p-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 9);
   }
 
-  // 'text' = not runnable on its own (README, headers, data files)
-  function langFromFilename(name) {
-    const n = name.toLowerCase();
-    if (n.endsWith('.py')) return 'python';
-    if (/\.(js|mjs|cjs)$/.test(n)) return 'javascript';
-    if (n.endsWith('.java')) return 'java';
-    if (n.endsWith('.c')) return 'c';
-    if (/\.(cpp|cc|cxx)$/.test(n)) return 'cpp';
-    return 'text';
-  }
-  const LANG_DOT = { python: 'dot-py', javascript: 'dot-js', java: 'dot-java', c: 'dot-c', cpp: 'dot-cpp', text: 'dot-md' };
-  const LANG_LABEL = { python: 'Python', javascript: 'JavaScript', java: 'Java', c: 'C', cpp: 'C++' };
-
-  function renderFileTree() {
-    const list = document.getElementById('file-list');
-    list.innerHTML = '';
-    Object.keys(activeFiles).forEach(name => {
-      const div = document.createElement('div');
-      div.className = 'ft-item' + (name === currentFile ? ' active' : '');
-      div.dataset.file = name;
-      const lang = activeFiles[name].lang;
-      const dotClass = LANG_DOT[lang] || 'dot-md';
-      div.innerHTML = '<span class="ft-dot ' + dotClass + '"></span>' + escapeHtml(name) +
-        (currentProjectId ? '<span class="ft-del" data-file="' + escapeHtml(name) + '">×</span>' : '');
-      div.addEventListener('click', (e) => {
-        if (e.target.classList.contains('ft-del')) return;
-        loadFile(name);
-      });
-      list.appendChild(div);
-    });
-    if (currentProjectId) {
-      list.querySelectorAll('.ft-del').forEach(el => {
-        el.addEventListener('click', (e) => {
-          e.stopPropagation();
-          deleteFileFromProject(el.dataset.file);
-        });
-      });
-    }
+  function makeProgram(language, title) {
+    const meta = LANGUAGES[language] || LANGUAGES.python;
+    return { id: uid(), name: title || nextFilename(meta.file), language, code: meta.starter, updatedAt: Date.now() };
   }
 
-  function loadFile(name) {
-    currentFile = name;
-    fname.textContent = name;
-    const lang = activeFiles[name].lang;
-    edApi.setLang(lang);                      // set the language first so the first paint is coloured correctly
-    editor.value = activeFiles[name].content;
-    savedContent[name] = activeFiles[name].content;
-    sbLang.textContent = LANG_LABEL[lang] || 'Plain text';
-    document.getElementById('editor-dot').className = 'ft-dot ' + (LANG_DOT[lang] || 'dot-md');
-    updateDirty();
-    renderFileTree();
-    connectRow.style.display = (lang !== 'text' && !backendUrl) ? 'flex' : 'none';
-    output.innerHTML = lang === 'text'
-      ? '<span class="hint">This file isn\'t runnable on its own' + (/\.(h|hpp|hh)$/i.test(name) ? ' — it\'s included by your .c/.cpp files.' : '.') + '</span>'
-      : 'Run ' + escapeHtml(name) + ' to see its output here (' + LANG_LABEL[lang] + (currentProjectId ? ', whole project' : '') + ').';
-    runBtn.style.visibility = lang === 'text' ? 'hidden' : 'visible';
+  function nextFilename(base) {
+    const used = new Set((state?.programs || []).map((p) => p.name));
+    if (!used.has(base)) return base;
+    const dot = base.lastIndexOf('.');
+    const stem = dot > 0 ? base.slice(0, dot) : base;
+    const ext = dot > 0 ? base.slice(dot) : '';
+    let n = 2;
+    while (used.has(`${stem}-${n}${ext}`)) n += 1;
+    return `${stem}-${n}${ext}`;
   }
 
-  // ---- projects: switching between demo mode and a real signed-in account ----
-
-  function enterDemoMode() {
-    currentProjectId = null;
-    currentProjectName = '';
-    resetTerminal();
-    activeFiles = demoFiles;
-    document.getElementById('project-bar').style.display = 'none';
-    document.getElementById('ft-add-row').style.display = 'none';
-    document.getElementById('ft-label').textContent = 'Sample files';
-    saveBtn.style.display = 'none';
-    loadFile('main.py');
+  function defaultState() {
+    const first = makeProgram('python', 'main.py');
+    return { version: 1, activeId: first.id, programs: [first] };
   }
 
-  async function loadMyProjects() {
-    if (!backendUrl || !authToken) return;
-    document.getElementById('ft-label').textContent = 'Files';
-    document.getElementById('project-bar').style.display = 'flex';
-    document.getElementById('ft-add-row').style.display = 'flex';
-    saveBtn.style.display = 'inline-block';
+  function loadState() {
     try {
-      const res = await fetch(backendUrl.replace(/\/$/, '') + '/projects', {
-        headers: { 'X-Session-Token': authToken }
-      });
-      const data = await res.json();
-      myProjects = data.projects || [];
-      renderDashboard();
-      const sel = document.getElementById('project-select');
-      sel.innerHTML = myProjects.length
-        ? myProjects.map(p => '<option value="' + p.id + '">' + escapeHtml(p.name) + '</option>').join('')
-        : '<option value="">No projects yet — click +</option>';
-      if (myProjects.length) {
-        sel.value = String(myProjects[0].id);
-        await selectProject(myProjects[0].id);
-      } else {
-        currentProjectId = null;
-        showEmptyProjectState();
-        document.getElementById('file-list').innerHTML = '<div class="ft-label">Create a project to start.</div>';
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+      if (saved?.version === 1 && Array.isArray(saved.programs) && saved.programs.length) {
+        const clean = saved.programs.filter((p) => p && typeof p.id === 'string' && typeof p.name === 'string' && LANGUAGES[p.language] && typeof p.code === 'string').slice(0, MAX_PROGRAMS);
+        if (clean.length) return { version: 1, activeId: clean.some((p) => p.id === saved.activeId) ? saved.activeId : clean[0].id, programs: clean };
       }
-    } catch (err) {
-      document.getElementById('file-list').innerHTML = '<div class="ft-label">Could not load projects.</div>';
-    }
+    } catch { /* use a clean local workspace when storage is blocked or malformed */ }
+    return defaultState();
   }
 
-  async function selectProject(id) {
+  function persist() {
     try {
-      const res = await fetch(backendUrl.replace(/\/$/, '') + '/projects/' + id, {
-        headers: { 'X-Session-Token': authToken }
-      });
-      const data = await res.json();
-      if (!res.ok) { output.innerHTML = '<span class="err-line">' + escapeHtml(data.error || 'Could not load project') + '</span>'; return; }
-      currentProjectId = id;
-      currentProjectName = data.name || ('project ' + id);
-      activeFiles = {};
-      savedContent = {};
-      (data.files || []).forEach(f => {
-        activeFiles[f.filename] = { lang: langFromFilename(f.filename), content: f.content };
-      });
-      resetTerminal();
-      const firstFile = Object.keys(activeFiles)[0];
-      if (firstFile) loadFile(firstFile);
-      else showEmptyProjectState();
-    } catch (err) {
-      output.innerHTML = '<span class="err-line">Could not reach backend to load the project.</span>';
-    }
-  }
-
-  document.getElementById('project-select').addEventListener('change', (e) => {
-    if (e.target.value) selectProject(Number(e.target.value));
-  });
-
-  document.getElementById('new-project-btn').addEventListener('click', async () => {
-    const name = prompt('Project name:');
-    if (!name) return;
-    const res = await fetch(backendUrl.replace(/\/$/, '') + '/projects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Session-Token': authToken },
-      body: JSON.stringify({ name: name })
-    });
-    const data = await res.json();
-    if (!res.ok) { alert(data.error || 'Could not create project'); return; }
-    await loadMyProjects();
-    document.getElementById('project-select').value = String(data.id);
-    await selectProject(data.id);
-  });
-
-  document.getElementById('add-file-btn').addEventListener('click', async () => {
-    const input = document.getElementById('new-file-name');
-    const filename = input.value.trim();
-    if (!filename || !currentProjectId) return;
-    const res = await fetch(backendUrl.replace(/\/$/, '') + '/projects/' + currentProjectId + '/files', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Session-Token': authToken },
-      body: JSON.stringify({ action: 'create', filename: filename, content: '' })
-    });
-    const data = await res.json();
-    if (!res.ok) { alert(data.error || 'Could not create file'); return; }
-    input.value = '';
-    activeFiles[filename] = { lang: langFromFilename(filename), content: '' };
-    loadFile(filename);
-  });
-
-  async function deleteFileFromProject(filename) {
-    if (!confirm('Delete ' + filename + '? This cannot be undone.')) return;
-    const res = await fetch(backendUrl.replace(/\/$/, '') + '/projects/' + currentProjectId + '/files', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Session-Token': authToken },
-      body: JSON.stringify({ action: 'delete', filename: filename })
-    });
-    if (!res.ok) { const d = await res.json(); alert(d.error || 'Could not delete file'); return; }
-    delete activeFiles[filename];
-    const remaining = Object.keys(activeFiles);
-    if (currentFile === filename && remaining.length) loadFile(remaining[0]);
-    else renderFileTree();
-  }
-
-  // Saves the open file to the account. Returns true on success. Used by the Save button and, silently, before every Run.
-  async function saveCurrentFile(silent) {
-    if (!currentProjectId || !currentFile || !activeFiles[currentFile]) return false;
-    activeFiles[currentFile].content = editor.value;
-    try {
-      const res = await fetch(api('/projects/' + currentProjectId + '/files'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Session-Token': authToken },
-        body: JSON.stringify({ action: 'save', filename: currentFile, content: editor.value })
-      });
-      const data = await res.json();
-      if (!res.ok) { if (!silent) alert(data.error || 'Save failed'); return false; }
-      savedContent[currentFile] = editor.value;
-      updateDirty();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      $('save-state').textContent = 'Saved locally';
+      $('save-state').className = 'save-state';
       return true;
-    } catch (err) {
-      if (!silent) alert('Could not reach backend to save.');
+    } catch {
+      $('save-state').textContent = 'Storage full';
+      $('save-state').className = 'save-state error';
       return false;
     }
   }
 
-  saveBtn.addEventListener('click', async () => {
-    if (!currentProjectId) { alert('Create or select a project first.'); return; }
-    if (!currentFile || !activeFiles[currentFile]) { alert('No file selected — add a file first.'); return; }
-    saveBtn.textContent = 'Saving…';
-    const ok = await saveCurrentFile(false);
-    saveBtn.textContent = ok ? 'Saved ✓' : 'Save';
-    if (ok) {
-      saveBtn.classList.add('saved');
-      setTimeout(() => { saveBtn.textContent = 'Save'; saveBtn.classList.remove('saved'); }, 1500);
-    }
-  });
-
-  document.querySelectorAll('.tab[data-view]').forEach(el => {
-    el.addEventListener('click', () => switchView(el.dataset.view));
-  });
-  function switchView(name) {
-    const target = document.getElementById('view-' + name);
-    if (!target) return;  // defensive: never crash on a click that isn't a real tab
-    document.querySelectorAll('.tab[data-view]').forEach(el => el.classList.toggle('active', el.dataset.view === name));
-    document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
-    target.classList.add('active');
-    if (name === 'problems') { loadProblems(); loadSubmissionHistory(); }
-    if (name === 'certs') loadCertState();
-    if (name === 'dashboard') renderDashboard();
+  function setSaving() {
+    $('save-state').textContent = 'Saving…';
+    $('save-state').className = 'save-state saving';
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      if (activeProgram) {
+        activeProgram.code = editor.value;
+        activeProgram.updatedAt = Date.now();
+      }
+      persist();
+    }, 220);
   }
 
-  // ---- real, sandboxed JavaScript execution via a terminable Worker ----
-  const WORKER_SRC = `
-    self.onmessage = function(e) {
-      const code = e.data;
-      const logs = [];
-      const origLog = console.log;
-      console.log = function(...args) {
-        logs.push(args.map(a => {
-          try { return typeof a === 'object' ? JSON.stringify(a) : String(a); }
-          catch (_) { return String(a); }
-        }).join(' '));
-      };
-      let error = null;
-      try {
-        const fn = new Function(code);
-        fn();
-      } catch (err) {
-        error = (err && err.name) ? (err.name + ': ' + err.message) : String(err);
-      }
-      console.log = origLog;
-      postMessage({ logs: logs, error: error });
-    };
-  `;
+  function setActive(id) {
+    const program = state.programs.find((p) => p.id === id);
+    if (!program) return;
+    if (!canUseLanguage(program.language)) { openAccountPanel(); showToast('Sign in and add this language to use it.'); return; }
+    if (activeProgram && activeProgram.id !== id) activeProgram.code = editor.value;
+    activeProgram = program;
+    state.activeId = id;
+    languageSelect.value = program.language;
+    editorApi?.setLang(program.language);
+    editor.value = program.code;
+    $('filename').textContent = program.name;
+    $('status-language').textContent = LANGUAGES[program.language].label;
+    $('file-type-dot').className = `file-type-dot ${program.language}`;
+    updateEditorMeta();
+    clearConsole(false);
+    renderProgramList();
+    persist();
+  }
 
-  function runJavaScriptSandboxed(code, timeoutMs) {
-    return new Promise((resolve) => {
-      const blob = new Blob([WORKER_SRC], { type: 'application/javascript' });
-      const url = URL.createObjectURL(blob);
-      const worker = new Worker(url);
-      let settled = false;
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        worker.terminate();
-        URL.revokeObjectURL(url);
-        resolve({ logs: [], error: null, timedOut: true });
-      }, timeoutMs);
-      worker.onmessage = (e) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        worker.terminate();
-        URL.revokeObjectURL(url);
-        resolve(Object.assign({ timedOut: false }, e.data));
-      };
-      worker.onerror = (e) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        worker.terminate();
-        URL.revokeObjectURL(url);
-        resolve({ logs: [], error: e.message || 'Worker error', timedOut: false });
-      };
-      worker.postMessage(code);
+  function renderProgramList() {
+    const list = $('program-list');
+    list.replaceChildren();
+    state.programs.forEach((program) => {
+      const item = document.createElement('div');
+      item.className = 'program-item' + (program.id === state.activeId ? ' active' : '');
+      item.setAttribute('role', 'listitem');
+      const select = document.createElement('button');
+      select.type = 'button';
+      select.className = 'program-select';
+      const dot = document.createElement('span');
+      dot.className = `program-dot ${program.language}`;
+      const name = document.createElement('span');
+      name.className = 'program-item-name';
+      name.textContent = program.name;
+      select.append(dot, name);
+      select.addEventListener('click', () => setActive(program.id));
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'program-item-remove';
+      remove.textContent = '×';
+      remove.setAttribute('aria-label', `Delete ${program.name}`);
+      remove.title = 'Delete program';
+      remove.addEventListener('click', (event) => {
+        event.stopPropagation();
+        deleteProgram(program.id);
+      });
+      item.append(select, remove);
+      list.append(item);
     });
   }
 
-  function api(path) { return backendUrl.replace(/\/$/, '') + path; }
-
-  function escapeHtml(s) {
-    return (s || '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  function updateEditorMeta() {
+    const lines = editor.value.split('\n').length;
+    $('source-size').textContent = `${lines} ${lines === 1 ? 'line' : 'lines'}`;
+    $('filename').textContent = activeProgram?.name || 'Untitled';
   }
 
-  // One run = one request to the cloud sandbox for that language.
-  //  - signed in + a project open  -> POST /projects/{id}/run   (the WHOLE project: every .java / .c / .cpp file is built together)
-  //  - otherwise                   -> POST /execute             (just this file)
-  async function runOnServer(lang, code) {
-    const stdin = document.getElementById('stdin-input').value;
-    let res;
-    if (currentProjectId && authToken) {
-      await saveCurrentFile(true);   // run what's in the editor, not what was last saved
-      res = await fetch(api('/projects/' + currentProjectId + '/run'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Session-Token': authToken },
-        body: JSON.stringify({ entry: currentFile, stdin: stdin })
-      });
-    } else {
-      res = await fetch(api('/execute'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ language: lang, code: code, stdin: stdin })
-      });
-    }
-    return res.json();
+  function showToast(message) {
+    const el = $('toast');
+    el.textContent = message;
+    el.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.hidden = true; }, 2700);
   }
 
-  runBtn.addEventListener('click', runCurrentFile);
-  document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-      if (document.getElementById('view-ide').classList.contains('active')) { e.preventDefault(); runCurrentFile(); }
-      else if (document.getElementById('view-problems').classList.contains('active')) { e.preventDefault(); document.getElementById('submit-btn').click(); }
+  function updateConnection(kind, label, detail) {
+    connectionChip.className = `connection-chip ${kind}`;
+    connectionLabel.textContent = label;
+    $('backend-detail').textContent = detail || `Backend: ${label.toLowerCase()}`;
+  }
+
+  async function checkBackend() {
+    updateConnection('checking', 'Connecting', 'Backend: checking');
+    try {
+      const response = await fetch(`${BACKEND_URL}/health`, { method: 'GET', cache: 'no-store', signal: AbortSignal.timeout(6500) });
+      const health = await response.json();
+      if (!response.ok || health.status !== 'ok') throw new Error('Health check failed');
+      updateConnection(health.databaseConfigured === false ? 'warning' : 'online', health.databaseConfigured === false ? 'Needs setup' : 'Connected', health.databaseConfigured === false ? 'Backend: database configuration missing' : 'Backend: online');
+      await checkRuntimes();
+    } catch {
+      updateConnection('offline', navigator.onLine ? 'Unavailable' : 'Offline', 'Backend: unreachable');
+      setRuntimeState(null);
     }
-  });
-  async function runCurrentFile() {
-    if (!currentFile || !activeFiles[currentFile]) {
-      output.innerHTML = '<span class="hint">No file selected — add or pick a file first.</span>';
+  }
+
+  function setRuntimeState(sandboxes) {
+    const host = $('runtime-list');
+    host.replaceChildren();
+    const cap = document.createElement('span');
+    cap.className = 'runtime-caption';
+    cap.textContent = 'RUNTIMES';
+    host.append(cap);
+    Object.entries(LANGUAGES).forEach(([id, meta]) => {
+      const item = document.createElement('span');
+      const info = sandboxes?.find((runtime) => runtime.id === id);
+      const available = info?.available === true;
+      item.className = `runtime-pill ${!sandboxes ? 'offline' : available ? 'ready' : 'missing'}`;
+      item.textContent = meta.label;
+      item.title = !sandboxes ? 'Backend unavailable' : available ? `${meta.label} runtime available` : `${meta.label} needs compiler setup`;
+      host.append(item);
+    });
+  }
+
+  async function checkRuntimes() {
+    try {
+      const response = await fetch(`${BACKEND_URL}/sandboxes`, { method: 'GET', cache: 'no-store', signal: AbortSignal.timeout(6500) });
+      if (!response.ok) throw new Error('Runtime check failed');
+      const data = await response.json();
+      const sandboxes = Array.isArray(data.sandboxes) ? data.sandboxes : [];
+      setRuntimeState(sandboxes);
+      const unavailable = sandboxes.filter((runtime) => runtime.available === false);
+      if (unavailable.length) $('backend-detail').textContent = `${unavailable.length} runtime(s) need setup`;
+      else $('backend-detail').textContent = 'All runtimes ready';
+      if (data.isolation?.driver === 'vercel-sandbox') $('backend-detail').title = 'Programs run in isolated Vercel Sandbox microVMs';
+    } catch {
+      setRuntimeState(null);
+    }
+  }
+
+  function outputBlock(label, text, extraClass) {
+    if (!text) return null;
+    const section = document.createElement('section');
+    section.className = 'output-section';
+    const name = document.createElement('span');
+    name.className = 'output-section-label';
+    name.textContent = label;
+    const pre = document.createElement('pre');
+    pre.className = 'output-text' + (extraClass ? ` ${extraClass}` : '');
+    pre.textContent = text;
+    section.append(name, pre);
+    return section;
+  }
+
+  function setResultState(kind, label) {
+    stateLabel.className = `result-state ${kind || ''}`.trim();
+    const text = stateLabel.querySelector('span:last-child');
+    if (text) text.textContent = label;
+  }
+
+  function clearConsole(updateStatus = true) {
+    lastResult = null;
+    output.replaceChildren();
+    const empty = document.createElement('div');
+    empty.className = 'empty-output';
+    const mark = document.createElement('span');
+    mark.className = 'empty-output-mark';
+    mark.textContent = '›';
+    const copy = document.createElement('div');
+    const strong = document.createElement('strong');
+    strong.textContent = 'Output will appear here';
+    const p = document.createElement('p');
+    p.textContent = 'Run your program to see standard output, errors and execution time.';
+    copy.append(strong, p);
+    empty.append(mark, copy);
+    output.append(empty);
+    $('console-subtitle').textContent = 'Ready when you are';
+    $('execution-time').textContent = '';
+    if (updateStatus) setResultState('', 'Idle');
+  }
+
+  function renderExecution(result, httpStatus) {
+    lastResult = result;
+    output.replaceChildren();
+    const compileError = result?.compileError === true;
+    const timedOut = result?.timedOut === true;
+    const runtimeError = Number.isInteger(result?.exitCode) && result.exitCode !== 0 && !timedOut;
+    const failed = compileError || timedOut || runtimeError || httpStatus >= 400;
+    const heading = document.createElement('div');
+    heading.className = `output-heading ${failed ? (timedOut ? 'warning' : 'error') : 'success'}`;
+    heading.textContent = compileError ? 'Compilation failed' : timedOut ? 'Execution timed out' : runtimeError ? `Program exited with code ${result.exitCode}` : 'Execution completed';
+    output.append(heading);
+    const stdout = outputBlock('Standard output', result.stdout || 'Program finished without standard output.');
+    const stderr = outputBlock(compileError ? 'Compiler diagnostics' : 'Standard error', result.stderr, 'stderr');
+    if (stdout) output.append(stdout);
+    if (stderr) output.append(stderr);
+    if (result.compile && !compileError && (result.compile.stdout || result.compile.stderr)) {
+      const compile = outputBlock('Compilation', [result.compile.stdout, result.compile.stderr].filter(Boolean).join('\n'));
+      if (compile) output.append(compile);
+    }
+    const duration = Number.isFinite(Number(result.timeMs)) ? `${Math.max(0, Math.round(Number(result.timeMs)))} ms` : '—';
+    $('execution-time').textContent = `Execution ${duration}${typeof result.exitCode === 'number' ? ` · exit ${result.exitCode}` : ''}`;
+    $('console-subtitle').textContent = failed ? 'Completed with an issue' : 'Run successful';
+    setResultState(failed ? (timedOut ? 'warning' : 'error') : 'success', compileError ? 'Compilation error' : timedOut ? 'Timed out' : runtimeError ? 'Runtime error' : 'Success');
+  }
+
+  async function runCode() {
+    if (isRunning) return;
+    if (!navigator.onLine) {
+      clearConsole(false);
+      showError('You are offline. Your edits are saved locally; reconnect to run code.');
       return;
     }
-    const lang = activeFiles[currentFile].lang;
-    if (lang === 'text') return;
-    showConsoleTab('output');
+    if (!BACKEND_URL) {
+      showError('The execution backend is not configured.');
+      return;
+    }
+    const language = activeProgram.language;
     const code = editor.value;
-
-    runBtn.disabled = true;
-    consoleEl.classList.add('is-running');   // lights the ember seam for exactly as long as code is executing
+    const stdin = $('stdin-input').value;
+    if (!code.trim()) {
+      showError('Add some code before running this program.');
+      return;
+    }
+    isRunning = true;
+    runButton.disabled = true;
     runLabel.textContent = 'Running';
-    output.innerHTML = '<span class="hint">' + (lang === 'java' || lang === 'c' || lang === 'cpp' ? 'Compiling and running…' : 'Running…') + '</span>';
-
+    $('console-subtitle').textContent = language === 'java' || language === 'c' || language === 'cpp' ? 'Compiling and running…' : 'Running…';
+    $('execution-time').textContent = '';
+    setResultState('running', 'Running');
+    output.replaceChildren();
+    const progress = document.createElement('div');
+    progress.className = 'empty-output';
+    progress.textContent = 'Your program is running in an isolated sandbox…';
+    output.append(progress);
     try {
-      if (!backendUrl) {
-        if (lang === 'javascript') {
-          renderResult(await runJavaScriptSandboxed(code, 5000), 'Ran in a browser worker — connect a backend for stdin, require() and packages.');
-        } else {
-          output.innerHTML = '<span class="hint">' + LANG_LABEL[lang] + ' runs on the DracoSkill backend, which isn\'t connected. Enter its address below and choose Connect.</span>';
-          connectRow.style.display = 'flex';
-        }
-      } else {
-        const data = await runOnServer(lang, code);
-        if (data.error) output.innerHTML = '<span class="err-line">' + escapeHtml(data.error) + '</span>';
-        else renderServerResult(data);
-      }
-    } catch (err) {
-      if (lang === 'javascript') {
-        renderResult(await runJavaScriptSandboxed(code, 5000), 'Backend unreachable — ran in a browser worker instead.');
-      } else {
-        output.innerHTML = '<span class="err-line">Could not reach ' + escapeHtml(backendUrl) + ' (' + escapeHtml(err.message || String(err)) + '). If the page is hosted on https, the backend must be https too.</span>';
-      }
-    }
-    runLabel.textContent = 'Run';
-    runBtn.disabled = false;
-    consoleEl.classList.remove('is-running');
-  }
-
-  function renderServerResult(r) {
-    let html = '';
-    const comp = r.compile;
-    if (r.compileError) {
-      html += '<span class="err-line">Compilation failed\n\n' + escapeHtml(r.stderr) + '</span>';
-    } else {
-      if (comp && (comp.stderr || comp.stdout)) html += '<span class="compile-line">' + escapeHtml((comp.stderr || comp.stdout).trimEnd()) + '</span>\n\n';
-      if (r.stdout) html += '<span class="ok-line">' + escapeHtml(r.stdout.replace(/\n$/, '')) + '</span>';
-      if (r.stderr) html += (r.stdout ? '\n' : '') + '<span class="err-line">' + escapeHtml(r.stderr.replace(/\n$/, '')) + '</span>';
-      if (!r.stdout && !r.stderr) html += '<span class="hint">(no output)</span>';
-      if (r.truncated) html += '\n<span class="hint">(output truncated)</span>';
-    }
-    const bits = [];
-    if (comp && !r.compileError) bits.push('Compiled in ' + comp.timeMs + ' ms');
-    if (!r.compileError) bits.push((bits.length ? 'ran' : 'Ran') + ' in ' + r.timeMs + ' ms');
-    if (typeof r.exitCode === 'number' && r.exitCode !== 0 && !r.compileError) bits.push('exited with code ' + r.exitCode);
-    if (r.skippedFiles && r.skippedFiles.length) bits.push('skipped files with unsafe names: ' + r.skippedFiles.join(', '));
-    if (bits.length) html += '\n\n<span class="meta-line">' + escapeHtml(bits.join(', ')) + '.</span>';
-    output.innerHTML = html;
-  }
-
-  function renderResult(result, note) {
-    if (result.timedOut) {
-      output.innerHTML = '<span class="err-line">Execution timed out.</span>';
-      return;
-    }
-    let html = '';
-    if (result.logs && result.logs.length) {
-      html += '<span class="ok-line">' + escapeHtml(result.logs.join('\n')) + '</span>';
-    }
-    if (result.error) {
-      html += (html ? '\n\n' : '') + '<span class="err-line">' + escapeHtml(result.error) + '</span>';
-    }
-    if (!html) {
-      html = '<span class="hint">(no output)</span>';
-    }
-    if (note) html += '\n\n<span class="meta-line">' + escapeHtml(note) + '</span>';
-    output.innerHTML = html;
-  }
-
-  document.getElementById('connect-btn').addEventListener('click', () => {
-    const val = document.getElementById('backend-url').value.trim();
-    backendUrl = val;
-    output.innerHTML = val
-      ? '<span class="hint">Backend set to ' + escapeHtml(val) + ' — press Run to try it.</span>'
-      : '<span class="hint">Backend cleared.</span>';
-    if (val && authToken) loadMyProjects();
-    loadSandboxes();
-  });
-
-  // ---- Problems / judge ----
-  let problemsData = {};
-  let currentProblemId = null;
-  let problemLang = 'python';
-
-  async function loadProblems() {
-    const list = document.getElementById('problem-list');
-    if (!backendUrl) {
-      list.innerHTML = '<div class="ft-label">No backend connected. Connect one in the Editor tab.</div>';
-      return;
-    }
-    list.innerHTML = '<div class="ft-label">Loading…</div>';
-    try {
-      const res = await fetch(backendUrl.replace(/\/$/, '') + '/problems');
-      const data = await res.json();
-      problemsData = {};
-      (data.problems || []).forEach(p => { problemsData[p.id] = p; });
-      renderProblemList();
-      renderDashboard();
-    } catch (err) {
-      list.innerHTML = '<div class="ft-label">Could not reach the backend: ' + escapeHtml(err.message || String(err)) + '</div>';
-    }
-  }
-
-  function renderProblemList() {
-    const list = document.getElementById('problem-list');
-    list.innerHTML = '<div class="ft-label">Problems</div>';
-    Object.values(problemsData).forEach(p => {
-      const div = document.createElement('div');
-      div.className = 'problem-item' + (p.id === currentProblemId ? ' active' : '');
-      div.innerHTML = '<div class="pt">' + escapeHtml(p.title) + '<span class="diff-pill diff-' + p.difficulty + '">' + escapeHtml(p.difficulty) + '</span></div>';
-      div.addEventListener('click', () => selectProblem(p.id));
-      list.appendChild(div);
-    });
-  }
-
-  function selectProblem(id) {
-    currentProblemId = id;
-    const p = problemsData[id];
-    document.getElementById('problem-desc').innerHTML = '<h3>' + escapeHtml(p.title) + '</h3><span class="diff-pill diff-' + p.difficulty + '">' + escapeHtml(p.difficulty) + '</span><p>' + escapeHtml(p.description) + '</p>';
-    document.getElementById('problem-editor').value = p.starter[problemLang] || '';
-    document.getElementById('problem-output').innerHTML = '<span class="hint">Submit runs your code against every test case, including hidden ones.</span>';
-    renderProblemList();
-  }
-
-  const probEd = DracoEditor.attach(document.getElementById('problem-editor'), { lang: 'python' });
-  document.querySelectorAll('.lang-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      problemLang = btn.dataset.lang;
-      probEd.setLang(problemLang);
-      document.querySelectorAll('.lang-btn').forEach(b => b.classList.toggle('active', b === btn));
-      if (currentProblemId) {
-        document.getElementById('problem-editor').value = problemsData[currentProblemId].starter[problemLang] || '';
-      }
-    });
-  });
-
-  document.getElementById('submit-btn').addEventListener('click', async () => {
-    const out = document.getElementById('problem-output');
-    if (!currentProblemId) { out.innerHTML = '<span class="hint">Pick a problem first.</span>'; return; }
-    if (!backendUrl) { out.innerHTML = '<span class="hint">Connect a backend from the IDE tab first.</span>'; return; }
-    const code = document.getElementById('problem-editor').value;
-    out.innerHTML = '<span class="hint">Judging…</span>';
-    const panel = document.getElementById('verdict-panel');
-    const submitBtn = document.getElementById('submit-btn');
-    panel.classList.add('is-running'); submitBtn.disabled = true; document.getElementById('submit-label').textContent = 'Judging';
-    try {
-      const res = await fetch(backendUrl.replace(/\/$/, '') + '/submit', {
+      const headers = { 'Content-Type': 'application/json' };
+      if (accountSession?.access_token) headers.Authorization = `Bearer ${accountSession.access_token}`;
+      const response = await fetch(`${BACKEND_URL}/execute`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Session-Token': authToken || '' },
-        body: JSON.stringify({ problemId: currentProblemId, language: problemLang, code: code })
+        headers,
+        body: JSON.stringify({ language, code, stdin }),
+        cache: 'no-store',
+        signal: AbortSignal.timeout(52_000)
       });
-      const data = await res.json();
-      renderVerdict(data);
-      if (currentUsername) loadSubmissionHistory();
-    } catch (err) {
-      out.innerHTML = '<span class="err-line">Could not reach backend: ' + escapeHtml(err.message || String(err)) + '</span>';
+      const data = await response.json().catch(() => ({}));
+      if (data.error && response.status !== 200) {
+        showError(data.error, response.status === 429 ? 'Rate limit' : response.status === 503 ? 'Service unavailable' : 'Request failed');
+        return;
+      }
+      renderExecution(data, response.status);
+    } catch (error) {
+      showError(error?.name === 'TimeoutError' ? 'The request took too long. The server may still be starting; please retry.' : 'Could not reach the compiler backend. Your source code is still saved on this device.');
+      updateConnection('offline', 'Unavailable', 'Backend: request failed');
     } finally {
-      panel.classList.remove('is-running'); submitBtn.disabled = false; document.getElementById('submit-label').textContent = 'Submit';
+      isRunning = false;
+      runButton.disabled = false;
+      runLabel.textContent = 'Run';
     }
+  }
+
+  function showError(message, title = 'Execution unavailable') {
+    output.replaceChildren();
+    const heading = document.createElement('div');
+    heading.className = 'output-heading error';
+    heading.textContent = title;
+    const block = outputBlock('Details', String(message));
+    output.append(heading);
+    if (block) output.append(block);
+    $('console-subtitle').textContent = title;
+    $('execution-time').textContent = '';
+    setResultState('error', title);
+  }
+
+  function createProgram(language = languageSelect.value) {
+    if (!canUseLanguage(language)) { openAccountPanel(); showToast('Sign in and add this language to unlock it.'); return; }
+    if (state.programs.length >= MAX_PROGRAMS) {
+      showToast(`You can keep up to ${MAX_PROGRAMS} local programs in this workspace.`);
+      return;
+    }
+    if (activeProgram) activeProgram.code = editor.value;
+    const program = makeProgram(language);
+    state.programs.unshift(program);
+    setActive(program.id);
+    editor.focus();
+    showToast('New program created. It will autosave on this device.');
+  }
+
+  function deleteProgram(id) {
+    const program = state.programs.find((p) => p.id === id);
+    if (!program) return;
+    if (!window.confirm(`Delete ${program.name}? This removes its local draft.`)) return;
+    const wasActive = state.activeId === id;
+    state.programs = state.programs.filter((p) => p.id !== id);
+    if (!state.programs.length) state = defaultState();
+    if (wasActive) setActive(state.programs[0].id);
+    else {
+      renderProgramList();
+      persist();
+    }
+    showToast('Program deleted from this device.');
+  }
+
+  function setLanguage(language) {
+    if (!LANGUAGES[language] || !activeProgram || activeProgram.language === language) return;
+    if (!canUseLanguage(language)) { languageSelect.value = activeProgram.language; openAccountPanel(); showToast('Sign in and add this language to unlock it.'); return; }
+    if (!window.confirm(`Change this file to ${LANGUAGES[language].label}? Its current source will be kept as-is; it will not be translated.`)) {
+      languageSelect.value = activeProgram.language;
+      return;
+    }
+    activeProgram.language = language;
+    const meta = LANGUAGES[language];
+    const stem = activeProgram.name.replace(/\.[^.]+$/, '') || 'main';
+    activeProgram.name = `${stem}${meta.extension}`;
+    editorApi.setLang(language);
+    $('status-language').textContent = meta.label;
+    $('file-type-dot').className = `file-type-dot ${language}`;
+    persist();
+    renderProgramList();
+    updateEditorMeta();
+    showToast(`Language set to ${meta.label}. Source was preserved.`);
+  }
+
+  function resetProgram() {
+    if (!activeProgram) return;
+    if (!window.confirm('Replace this program with the language starter template?')) return;
+    editor.value = LANGUAGES[activeProgram.language].starter;
+    activeProgram.code = editor.value;
+    setSaving();
+    clearConsole();
+    showToast('Starter template restored.');
+  }
+
+  function shareProgram() {
+    const code = editor.value;
+    if (code.length > 10_000) {
+      showToast('This program is too large for a share link. Download the source file instead.');
+      return;
+    }
+    try {
+      const bytes = new TextEncoder().encode(code);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      const encoded = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+      const url = `${location.origin}${location.pathname}?lang=${encodeURIComponent(activeProgram.language)}#code=${encoded}`;
+      copyText(url).then(() => showToast('Share link copied. It includes this language and source code.')).catch(() => showToast('Could not copy automatically. Check clipboard permissions.'));
+    } catch {
+      showToast('Could not create a share link for this source.');
+    }
+  }
+
+  async function copyText(value) {
+    if (navigator.clipboard?.writeText && window.isSecureContext) return navigator.clipboard.writeText(value);
+    const input = document.createElement('textarea');
+    input.value = value;
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    document.body.append(input);
+    input.select();
+    const copied = document.execCommand('copy');
+    input.remove();
+    if (!copied) throw new Error('Clipboard unavailable');
+  }
+
+  function downloadProgram() {
+    const blob = new Blob([editor.value], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = activeProgram?.name || LANGUAGES[activeProgram?.language || 'python'].file;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast(`Downloaded ${link.download}.`);
+  }
+
+  function loadSharedProgram() {
+    const match = location.hash.match(/(?:^#|&)code=([A-Za-z0-9_-]*)$/);
+    if (!match) return false;
+    try {
+      const base64 = match[1].replace(/-/g, '+').replace(/_/g, '/');
+      const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
+      const binary = atob(padded);
+      const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+      const code = new TextDecoder().decode(bytes);
+      const requestedLanguage = new URLSearchParams(location.search).get('lang');
+      const language = LANGUAGES[requestedLanguage] ? requestedLanguage : 'python';
+      const program = makeProgram(language);
+      program.code = code;
+      program.name = nextFilename(LANGUAGES[language].file);
+      state.programs.unshift(program);
+      state.programs = state.programs.slice(0, MAX_PROGRAMS);
+      state.activeId = program.id;
+      history.replaceState(null, '', `${location.pathname}?lang=${language}`);
+      showToast('Shared source loaded into a new local program.');
+      return true;
+    } catch {
+      showToast('That share link could not be decoded.');
+      return false;
+    }
+  }
+
+
+  const PACKAGE_CATALOG = {
+    python: ['numpy','pandas','matplotlib','requests','scipy','pillow','sympy','beautifulsoup4','flask','pytest'],
+    javascript: ['lodash','axios','dayjs','uuid','zod','chalk','express','date-fns','cheerio','mathjs'],
+    java: ['org.json:json:20240303','com.google.code.gson:gson:2.11.0'],
+    c: ['libsqlite3-dev','libssl-dev','libcurl4-openssl-dev'],
+    cpp: ['nlohmann-json3-dev','libboost-dev','libeigen3-dev','libfmt-dev']
+  };
+  const LABELS = { python:'Python', javascript:'JavaScript', java:'Java', c:'C', cpp:'C++' };
+  function canUseLanguage(language) { return language === 'python' || language === 'javascript' || installedLanguages.has(language); }
+  function openAccountPanel() { $('account-panel').classList.add('open');$('account-panel').setAttribute('aria-hidden','false');$('account-panel-scrim').hidden=false;$('account-menu-button').setAttribute('aria-expanded','true');renderPackageControls(); }
+  function closeAccountPanel() { $('account-panel').classList.remove('open');$('account-panel').setAttribute('aria-hidden','true');$('account-panel-scrim').hidden=true;$('account-menu-button').setAttribute('aria-expanded','false'); }
+  function updateLanguageAccess() {
+    [...languageSelect.options].forEach(option=>{option.disabled=!canUseLanguage(option.value);option.textContent=LABELS[option.value]+(option.disabled?' · Sign in to unlock':'');});
+    if(activeProgram&&!canUseLanguage(activeProgram.language)){const fallback=state.programs.find(p=>canUseLanguage(p.language));if(fallback)setActive(fallback.id);}
+    renderInstalledLanguages();renderPackageControls();
+  }
+  async function refreshAccountData() {
+    if(!supabaseClient||!accountUser)return;
+    const [langs,packs]=await Promise.all([supabaseClient.from('draco_user_languages').select('language').order('installed_at'),supabaseClient.from('draco_user_packages').select('language,package_name,package_version,installed_at').order('installed_at')]);
+    if(langs.error)throw langs.error;if(packs.error)throw packs.error;
+    installedLanguages=new Set((langs.data||[]).map(x=>x.language));installedPackages=packs.data||[];updateLanguageAccess();
+  }
+  function renderInstalledLanguages() {
+    const host=$('installed-language-list');if(!host)return;host.replaceChildren();
+    ['python','javascript',...installedLanguages].forEach(language=>{const row=document.createElement('div');row.className='installed-row';const name=document.createElement('span');name.textContent=LABELS[language];const state=document.createElement('small');state.textContent=(language==='python'||language==='javascript')?'Included by default':'Added to your account';row.append(name,state);host.append(row);});
+    document.querySelectorAll('[data-add-language]').forEach(button=>{const language=button.dataset.addLanguage,added=installedLanguages.has(language);button.disabled=added;button.querySelector('b').textContent=added?'✓':'＋';button.querySelector('small').textContent=added?'Added to account':LABELS[language]+' compiler';});
+  }
+  function renderPackageControls() {
+    const select=$('package-language');if(!select)return;const available=['python','javascript',...installedLanguages],previous=available.includes(select.value)?select.value:'python';select.replaceChildren();
+    available.forEach(language=>{const option=document.createElement('option');option.value=language;option.textContent=LABELS[language];select.append(option);});select.value=previous;
+    const suggestions=$('package-suggestions');suggestions.replaceChildren();
+    (PACKAGE_CATALOG[select.value]||[]).forEach(name=>{const button=document.createElement('button');button.type='button';button.className='package-chip';button.textContent=name;button.addEventListener('click',()=>{$('package-name').value=name;$('package-name').focus();});suggestions.append(button);});
+    renderInstalledPackages();
+  }
+  function renderInstalledPackages() {
+    const host=$('installed-package-list');if(!host)return;host.replaceChildren();const language=$('package-language').value,list=installedPackages.filter(p=>p.language===language);
+    if(!list.length){const empty=document.createElement('p');empty.className='installed-empty';empty.textContent='No packages added for this language yet.';host.append(empty);return;}
+    list.forEach(p=>{const row=document.createElement('div');row.className='installed-row';const name=document.createElement('span');name.textContent=p.package_name+(p.package_version?'@'+p.package_version:'');const remove=document.createElement('button');remove.type='button';remove.textContent='Remove';remove.addEventListener('click',()=>removePackage(p));row.append(name,remove);host.append(row);});
+  }
+  async function addLanguage(language) {
+    if(!accountUser){openAccountPanel();$('account-email').focus();showToast('Create an account to add languages.');return;}
+    if(!['java','c','cpp'].includes(language)||accountBusy||installedLanguages.has(language))return;accountBusy=true;
+    try{const {error}=await supabaseClient.from('draco_user_languages').insert({user_id:accountUser.id,language});if(error)throw error;await refreshAccountData();showToast(LABELS[language]+' added to your account.');}
+    catch(e){showToast(e.message||'Could not add this language.');}finally{accountBusy=false;}
+  }
+  async function addPackage() {
+    if(!accountUser){openAccountPanel();showToast('Sign in to save packages to your account.');return;}
+    const language=$('package-language').value,name=$('package-name').value.trim(),version=$('package-version').value.trim();
+    if(!name){showToast('Enter a package name.');return;}if(!canUseLanguage(language)){showToast('Add this language to your account first.');return;}
+    const validName = language==='python' ? /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/.test(name)
+      : language==='javascript' ? /^(?:@[a-z0-9][a-z0-9._-]{0,49}\/)?[a-z0-9][a-z0-9._-]{0,99}$/i.test(name)
+      : language==='java' ? /^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$/.test(name)
+      : language==='c' ? ['libsqlite3-dev','libssl-dev','libcurl4-openssl-dev'].includes(name)
+      : ['nlohmann-json3-dev','libboost-dev','libeigen3-dev','libfmt-dev'].includes(name);
+    if(!validName){showToast('Choose a supported package from this language catalogue.');return;}
+    if(version&&!/^[A-Za-z0-9.+_-]{1,80}$/.test(version)){showToast('Version contains unsupported characters.');return;}
+    if(installedPackages.some(p=>p.language===language&&p.package_name.toLowerCase()===name.toLowerCase())){showToast('That package is already on your account.');return;}
+    accountBusy=true;$('account-add-package').disabled=true;
+    try{const {error}=await supabaseClient.from('draco_user_packages').insert({user_id:accountUser.id,language,package_name:name,package_version:version});if(error)throw error;$('package-name').value='';$('package-version').value='';await refreshAccountData();showToast(name+' added. It will be installed in your next run.');}
+    catch(e){showToast(e.message||'Could not add this package.');}finally{accountBusy=false;$('account-add-package').disabled=false;}
+  }
+  async function removePackage(p) {
+    try{const {error}=await supabaseClient.from('draco_user_packages').delete().eq('language',p.language).eq('package_name',p.package_name);if(error)throw error;await refreshAccountData();showToast(p.package_name+' removed.');}
+    catch(e){showToast(e.message||'Could not remove package.');}
+  }
+  async function handleSignIn() {
+    if(!supabaseClient){$('account-auth-message').textContent='Account service is unavailable.';return;}
+    const email=$('account-email').value.trim(),password=$('account-password').value;if(!email||!password){$('account-auth-message').textContent='Enter your email and password.';return;}
+    $('account-auth-message').textContent='Signing in…';const {data,error}=await supabaseClient.auth.signInWithPassword({email,password});if(error){$('account-auth-message').textContent=error.message;return;}
+    accountSession=data.session;accountUser=data.user;await applyAccountSession();
+  }
+  async function handleSignUp() {
+    if(!supabaseClient){$('account-auth-message').textContent='Account service is unavailable.';return;}
+    const email=$('account-email').value.trim(),password=$('account-password').value;if(!email||password.length<8){$('account-auth-message').textContent='Enter an email and a password with at least 8 characters.';return;}
+    $('account-auth-message').textContent='Creating account…';const {data,error}=await supabaseClient.auth.signUp({email,password,options:{emailRedirectTo:location.origin+location.pathname}});
+    if(error){$('account-auth-message').textContent=error.message;return;}if(!data.session){$('account-auth-message').textContent='Check your email to confirm your account, then sign in.';return;}
+    accountSession=data.session;accountUser=data.user;await applyAccountSession();
+  }
+  async function applyAccountSession() {
+    $('account-guest').hidden=!!accountUser;$('account-user').hidden=!accountUser;
+    if(accountUser){$('account-user-email').textContent=accountUser.email||'Signed in';$('account-avatar').textContent=(accountUser.email||'D').slice(0,1).toUpperCase();$('account-auth-message').textContent='';try{await refreshAccountData();}catch(e){showToast('Could not load account settings: '+e.message);}}
+    else{installedLanguages.clear();installedPackages=[];updateLanguageAccess();}
+    updateLanguageAccess();
+  }
+  async function initAccount() {
+    $('account-menu-button').addEventListener('click',openAccountPanel);$('account-panel-close').addEventListener('click',closeAccountPanel);$('account-panel-scrim').addEventListener('click',closeAccountPanel);
+    $('account-signin').addEventListener('click',handleSignIn);$('account-signup').addEventListener('click',handleSignUp);
+    $('account-signout').addEventListener('click',async()=>{await supabaseClient.auth.signOut();accountSession=null;accountUser=null;await applyAccountSession();showToast('Signed out. Guest languages remain available.');});
+    $('account-add-package').addEventListener('click',addPackage);$('package-language').addEventListener('change',renderPackageControls);
+    document.querySelectorAll('[data-add-language]').forEach(button=>button.addEventListener('click',()=>addLanguage(button.dataset.addLanguage)));
+    $('account-password').addEventListener('keydown',e=>{if(e.key==='Enter')handleSignIn();});
+    if(!supabaseClient){$('account-auth-message').textContent='Account sign-in could not initialize. Reload the page or check the network.';return;}
+    const {data}=await supabaseClient.auth.getSession();accountSession=data.session;accountUser=data.session?.user||null;await applyAccountSession();
+    supabaseClient.auth.onAuthStateChange((_event,session)=>{accountSession=session;accountUser=session?.user||null;setTimeout(()=>applyAccountSession(),0);});
+  }
+
+  function registerServiceWorker() {
+    if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).catch(() => {});
+    }, { once: true });
+  }
+
+  // Wire editor and controls.
+  editorApi = window.DracoEditor.attach(editor, {
+    lang: 'python',
+    onCursor: (line, column) => { $('cursor-position').textContent = `Line ${line}, column ${column}`; }
   });
 
-  function renderVerdict(data) {
-    const out = document.getElementById('problem-output');
-    if (data.error) {
-      out.innerHTML = '<span class="err-line">' + escapeHtml(data.error) + '</span>';
-      return;
-    }
-    const okClass = data.verdict === 'Accepted' ? 'verdict-Accepted' : 'verdict-bad';
-    let html = '<div class="verdict-banner ' + okClass + '">' + escapeHtml(data.verdict) + '</div>';
-    (data.results || []).forEach((r, i) => {
-      const icon = r.pass ? '<span class="tp">Pass</span>' : '<span class="tf">Fail</span>';
-      if (r.hidden) {
-        html += '<div class="test-row">' + icon + '<span>Hidden test ' + (i + 1) + '</span></div>';
-      } else {
-        html += '<div class="test-row">' + icon + '<span>Test ' + (i + 1) + ': input <code>' + escapeHtml(r.input) + '</code> expected <code>' + escapeHtml(r.expected) + '</code> got <code>' + escapeHtml(r.actual !== undefined ? r.actual : '') + '</code></span></div>';
-      }
-      if (r.stderr) {
-        html += '<div class="test-row err-line">' + escapeHtml(r.stderr.split('\n')[0]) + '</div>';
-      }
-    });
-    if (data.saved === false) {
-      html += '<div class="test-row hint">Log in to keep this in your submission history.</div>';
-    } else if (data.saved === true) {
-      html += '<div class="test-row hint">Saved to your history.</div>';
-    }
-    out.innerHTML = html;
-  }
+  if (loadSharedProgram()) persist();
+  activeProgram = state.programs.find((p) => p.id === state.activeId) || state.programs[0];
+  state.activeId = activeProgram.id;
+  setActive(activeProgram.id);
 
-  // ---- auth ----
-  function wireAuthPanel() {
-    document.getElementById('auth-toggle-btn').addEventListener('click', () => {
-      const panel = document.getElementById('auth-panel');
-      panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
-    });
-    document.getElementById('auth-login-btn').addEventListener('click', () => submitAuth('/auth/login'));
-    document.getElementById('auth-register-btn').addEventListener('click', () => submitAuth('/auth/register'));
-  }
-
-  async function submitAuth(path) {
-    const errEl = document.getElementById('auth-error');
-    errEl.textContent = '';
-    if (!backendUrl) { errEl.textContent = 'Connect a backend from the IDE tab first.'; return; }
-    const username = document.getElementById('auth-username').value.trim();
-    const password = document.getElementById('auth-password').value;
-    try {
-      const res = await fetch(backendUrl.replace(/\/$/, '') + path, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: username, password: password })
-      });
-      const data = await res.json();
-      if (!res.ok) { errEl.textContent = data.error || 'Something went wrong.'; return; }
-      authToken = data.token;
-      currentUsername = data.username;
-      renderAuthArea();
-      if (backendUrl) loadMyProjects();
-      resetTerminal();
-      if (document.getElementById('view-problems').classList.contains('active')) loadSubmissionHistory();
-    } catch (err) {
-      errEl.textContent = 'Could not reach backend: ' + (err.message || err);
-    }
-  }
-
-  function renderAuthArea() {
-    const area = document.getElementById('auth-area');
-    if (currentUsername) {
-      area.innerHTML = '<div class="auth-username-display">' + escapeHtml(currentUsername) + '<button id="auth-logout-btn">Log out</button></div>';
-      document.getElementById('auth-logout-btn').addEventListener('click', doLogout);
-      renderDashboard();
-    } else {
-      renderDashboard();
-      area.innerHTML =
-        '<button class="btn btn-sm" id="auth-toggle-btn">Log in</button>' +
-        '<div class="auth-panel" id="auth-panel" style="display:none;">' +
-        '<label class="field">Username<input type="text" id="auth-username" autocomplete="username" /></label>' +
-        '<label class="field">Password<input type="password" id="auth-password" autocomplete="current-password" /></label>' +
-        '<div class="auth-panel-actions"><button class="btn btn-ember btn-sm" id="auth-login-btn">Log in</button><button class="btn btn-sm secondary" id="auth-register-btn">Create account</button></div>' +
-        '<div class="auth-error" id="auth-error" role="alert"></div></div>';
-      wireAuthPanel();
-    }
-  }
-
-  async function doLogout() {
-    if (backendUrl && authToken) {
-      try {
-        await fetch(backendUrl.replace(/\/$/, '') + '/auth/logout', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Session-Token': authToken },
-          body: '{}'
-        });
-      } catch (_) { /* logging out locally still proceeds even if the request fails */ }
-    }
-    authToken = null;
-    currentUsername = null;
-    myProjects = [];
-    certProgress = null;
-    renderAuthArea();
-    document.getElementById('history-box').style.display = 'none';
-    enterDemoMode();
-  }
-
-  async function loadSubmissionHistory() {
-    const box = document.getElementById('history-box');
-    const list = document.getElementById('history-list');
-    if (!currentUsername || !backendUrl) { box.style.display = 'none'; return; }
-    box.style.display = 'block';
-    try {
-      const res = await fetch(backendUrl.replace(/\/$/, '') + '/submissions', {
-        headers: { 'X-Session-Token': authToken || '' }
-      });
-      const data = await res.json();
-      if (!data.submissions || !data.submissions.length) {
-        list.innerHTML = '<div class="history-row hp">No submissions yet.</div>';
-        return;
-      }
-      list.innerHTML = data.submissions.map(s =>
-        '<div class="history-row"><span class="hp">' + escapeHtml(s.problem_id) + '</span><span class="' + (s.verdict === 'Accepted' ? 'tp' : 'tf') + '">' + escapeHtml(s.verdict) + '</span></div>'
-      ).join('');
-    } catch (err) {
-      list.innerHTML = '<div class="history-row hp">Could not load history.</div>';
-    }
-  }
-
-  wireAuthPanel();
-  if (backendUrl) document.getElementById('backend-url').value = backendUrl;
-  loadFile('main.py');
-
-  // ---- Certificates ----
-  async function loadCertState() {
-    const el = document.getElementById('cert-content');
-    if (!backendUrl) {
-      el.innerHTML = '<p class="hint">No backend connected. Connect one in the Editor tab.</p>';
-      return;
-    }
-    if (!currentUsername) {
-      el.innerHTML = '<p class="hint">Log in (top right) to track your progress toward a certificate.</p>';
-      return;
-    }
-    el.innerHTML = '<span class="hint">Loading…</span>';
-    try {
-      const mineRes = await fetch(backendUrl.replace(/\/$/, '') + '/certificates/mine', {
-        headers: { 'X-Session-Token': authToken }
-      });
-      const mine = await mineRes.json();
-      if (mineRes.status === 501) {
-        el.innerHTML = '<p class="hint">This backend only runs code, so it cannot issue certificates. The full DracoSkill backend does.</p>';
-        return;
-      }
-      if (mine.issued) {
-        renderCertificateCard(mine);
-        return;
-      }
-      const progRes = await fetch(backendUrl.replace(/\/$/, '') + '/certificates/progress', {
-        headers: { 'X-Session-Token': authToken }
-      });
-      const prog = await progRes.json();
-      if (!progRes.ok) { el.innerHTML = '<p class="err-line">' + escapeHtml(prog.error || 'Could not load your progress.') + '</p>'; return; }
-      renderCertProgress(prog);
-    } catch (err) {
-      el.innerHTML = '<span class="err-line">Could not reach backend: ' + escapeHtml(err.message || String(err)) + '</span>';
-    }
-  }
-
-  function renderCertProgress(prog) {
-    const el = document.getElementById('cert-content');
-    const pct = prog.problems_total ? Math.round((prog.problems_solved / prog.problems_total) * 100) : 0;
-    let html = '<div class="cert-progress">';
-    html += '<div><strong>' + prog.problems_solved + ' / ' + prog.problems_total + '</strong> problems solved</div>';
-    html += '<div class="cert-progress-bar"><div class="cert-progress-fill" style="width:' + pct + '%;"></div></div>';
-    if (prog.eligible) {
-      html += '<button class="cert-issue-btn" id="issue-cert-btn">Issue my certificate</button>';
-    } else {
-      html += '<span class="hint">Solve every problem on the Problems tab to unlock it.</span>';
-    }
-    html += '</div>';
-    el.innerHTML = html;
-    if (prog.eligible) {
-      document.getElementById('issue-cert-btn').addEventListener('click', async () => {
-        const res = await fetch(backendUrl.replace(/\/$/, '') + '/certificates/issue', {
-          method: 'POST',
-          headers: { 'X-Session-Token': authToken }
-        });
-        const data = await res.json();
-        if (!res.ok) { alert(data.error || 'Could not issue certificate'); return; }
-        renderCertificateCard(Object.assign({ issued: true }, data));
-      });
-    }
-  }
-
-  function renderCertificateCard(cert) {
-    const el = document.getElementById('cert-content');
-    const verifyUrl = cert.confirmation_url;
-    const issuedDate = new Date(cert.issued_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
-    el.innerHTML =
-      '<div class="cert-card"><div class="cert-card-inner">' +
-        '<div class="cert-top">' +
-          '<img src="../assets/dracoskill-mark.png" alt="DracoSkill" />' +
-          '<div class="cert-title">DracoSkill certificate of problem solving</div>' +
-          '<div class="cert-qr-top"><div id="cert-qr" class="cert-qr"></div></div>' +
-        '</div>' +
-        '<div class="cert-body">' +
-          '<div class="cert-presented">This certifies that</div>' +
-          '<div class="cert-name">' + escapeHtml(cert.username) + '</div>' +
-          '<div class="cert-for">has successfully solved every problem in the</div>' +
-          '<div class="cert-track">' + escapeHtml(cert.track_name) + '</div>' +
-          '<div class="cert-date">Issued on ' + issuedDate + '</div>' +
-        '</div>' +
-        '<div class="cert-stats">' +
-          '<div class="cert-stat"><div class="cs-label">Problems solved</div><div class="cs-value">' + cert.problems_solved + ' / ' + cert.problems_total + '</div></div>' +
-          '<div class="cert-stat"><div class="cs-label">Accuracy</div><div class="cs-value">' + cert.accuracy_pct + '%</div></div>' +
-          '<div class="cert-stat"><div class="cs-label">Submissions</div><div class="cs-value">' + cert.total_submissions + '</div></div>' +
-        '</div>' +
-        '<div class="cert-bottom">' +
-          '<div class="cert-verify-text">Verify: ' + escapeHtml(verifyUrl) + '</div>' +
-          '<img class="cert-brand" src="../assets/cageddragons-mark.png" alt="CagedDragons" />' +
-        '</div>' +
-        '<div class="cert-footer-bar">Certificate ID: ' + escapeHtml(cert.certificate_code) + '</div>' +
-      '</div></div>' +
-      '<div class="cert-actions">' +
-        '<a href="' + escapeHtml(verifyUrl) + '" target="_blank" rel="noopener">Open the verification page</a>' +
-      '</div>';
-
-    // The QR code is a convenience: the verification URL is printed on the card either way, so if the
-    // QR library can't load, drop the empty slot instead of showing a broken one.
-    const qrEl = document.getElementById('cert-qr');
-    const dropQr = () => { const slot = qrEl.closest('.cert-qr-top'); if (slot) slot.remove(); };
-    if (window.QRCode) {
-      try { new QRCode(qrEl, { text: verifyUrl, width: 64, height: 64 }); }
-      catch (e) { dropQr(); }
-    } else { dropQr(); }
-  }
-
-
-  // ---- console tabs (Output | Terminal) ----
-  function showConsoleTab(name) {
-    document.querySelectorAll('.ctab').forEach(b => b.classList.toggle('active', b.dataset.ctab === name));
-    document.querySelectorAll('.cpane').forEach(p => p.classList.toggle('active', p.id === 'cpane-' + name));
-    if (name === 'terminal') setTimeout(() => termInput.focus(), 0);
-  }
-  document.querySelectorAll('.ctab').forEach(b => b.addEventListener('click', () => showConsoleTab(b.dataset.ctab)));
-  function openTerminal() { switchView('ide'); showConsoleTab('terminal'); }
-
-  // ---- sandboxes: what the server can actually run right now ----
-  async function loadSandboxes() {
-    if (!backendUrl) return;
-    sbState = 'loading';
-    renderDashboard();
-    try {
-      const res = await fetch(api('/sandboxes'));
-      renderSandboxes(await res.json());
-    } catch (err) {
-      renderSandboxes(null);
-    }
-  }
-
-  let backendFeatures = null;   // null = unknown (the full Python backend reports nothing here, so assume everything works)
-  let lastSandboxes = null;
-  let sbState = 'loading';   // loading | ok | down: so "still checking" is never shown as "unreachable"
-
-  function renderSandboxes(d) {
-    lastSandboxes = d;
-    sbState = (d && d.sandboxes) ? 'ok' : 'down';
-    backendFeatures = (d && d.features) || null;
-    const strip = document.getElementById('sandbox-strip');
-    if (!d || !d.sandboxes) {
-      strip.innerHTML = '';
-      setConn('down', 'Backend unreachable');
-    } else {
-      const tip = sb => sb.label + (sb.version ? ', ' + sb.version : '') + (sb.available ? '' : ', not installed on this server');
-      strip.innerHTML = d.sandboxes.filter(sb => sb.id !== 'terminal' || sb.available).map(sb =>
-        '<span class="sb-chip ' + (sb.available ? 'up' : 'down') + '" title="' + escapeHtml(tip(sb)) + '">' + escapeHtml(sb.label) + '</span>').join('');
-      const langs = d.sandboxes.filter(sb => sb.id !== 'terminal');
-      const ready = langs.filter(sb => sb.available).length;
-      setConn(ready === langs.length ? 'ready' : 'partial', ready + ' of ' + langs.length + ' runtimes ready');
-    }
-    applyFeatureNotes();
-    renderDashboard();
-  }
-
-  function setConn(kind, text) {
-    const chip = document.getElementById('conn-chip');
-    chip.className = 'chip ' + kind;
-    chip.textContent = text;
-  }
-
-  // The Vercel backend runs code but has no accounts/terminal. Say so up front instead of failing on login.
-  function applyFeatureNotes() {
-    const limited = backendFeatures && backendFeatures.accounts === false;
-    const authBtn = document.getElementById('auth-toggle-btn');
-    if (authBtn) authBtn.title = limited ? 'This backend runs code only: no accounts, projects or terminal' : '';
-    if (typeof resetTerminal === 'function' && termScreen && !authToken) resetTerminal();
-  }
-
-  // ---- terminal ----
-  const termScreen = document.getElementById('term-screen');
-  const termInput = document.getElementById('term-input');
-  const termPrompt = document.getElementById('term-prompt');
-  let termCwd = '';
-  let termHistory = [];
-  let termHistIdx = 0;
-  let termBusy = false;
-
-  function termPrint(text, cls) {
-    const el = document.createElement('div');
-    el.className = cls || 't-out';
-    el.textContent = text;
-    termScreen.appendChild(el);
-    termScreen.scrollTop = termScreen.scrollHeight;
-    return el;
-  }
-
-  function promptText() {
-    return (currentUsername || 'guest') + '@' + (currentProjectId ? currentProjectName : 'account') + ':/' + termCwd + '$';
-  }
-
-  function resetTerminal() {
-    termCwd = '';
-    termScreen.innerHTML = '';
-    termPrompt.textContent = promptText();
-    if (!backendUrl) {
-      termPrint('Connect a backend first (Output tab → Connect).', 't-dim');
-    } else if (backendFeatures && backendFeatures.terminal === false) {
-      termPrint('This backend (Vercel) runs code only: no accounts, projects or terminal. Use the Python backend (Render or self-hosted) for pip/npm/jar/clib installs.', 't-dim');
-    } else if (!authToken) {
-      termPrint('Log in (top right) to use the terminal. Packages you install are saved to your account in the cloud — never on your computer.', 't-dim');
-    } else {
-      termPrint('DracoSkill cloud terminal. Type "help" for commands.', 't-dim');
-      termPrint(currentProjectId
-        ? 'Project "' + currentProjectName + '" is open: installs go to this project. Add --account to make a library available to all your projects.'
-        : 'No project open: installs go to your account (available to every project). Create a project with + in the file panel for per-project installs.', 't-dim');
-    }
-  }
-
-  async function runTerminalCommand(raw) {
-    const cmd = raw.trim();
-    termPrint(promptText() + ' ' + raw, 't-cmd');
-    if (!cmd) return;
-    if (termHistory[termHistory.length - 1] !== cmd) termHistory.push(cmd);
-    termHistIdx = termHistory.length;
-    if (cmd === 'clear') { termScreen.innerHTML = ''; return; }
-    if (!backendUrl) { termPrint('No backend connected.', 't-err'); return; }
-    if (!authToken) { termPrint('Log in to use the terminal.', 't-err'); return; }
-
-    termBusy = true;
-    termInput.disabled = true;
-    const started = Date.now();
-    const waiting = termPrint('running…', 't-dim');
-    const tick = setInterval(() => { waiting.textContent = 'running… ' + Math.round((Date.now() - started) / 1000) + 's'; }, 1000);
-    try {
-      if (currentProjectId && currentFile && activeFiles[currentFile] && editor.value !== savedContent[currentFile]) {
-        await saveCurrentFile(true);   // so `run`, `cat` and compilers see what's in the editor
-      }
-      const res = await fetch(api('/terminal'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Session-Token': authToken },
-        body: JSON.stringify({ command: cmd, cwd: termCwd, projectId: currentProjectId })
-      });
-      const data = await res.json();
-      clearInterval(tick);
-      waiting.remove();
-      if (!res.ok) {
-        termPrint(data.error || ('Request failed (' + res.status + ')'), 't-err');
-      } else {
-        if (data.clear) termScreen.innerHTML = '';
-        if (data.output) termPrint(data.output.replace(/\n$/, ''), data.exitCode ? 't-err' : 't-out');
-        termCwd = data.cwd || '';
-        if (/^(touch|rm|mv|cp|echo)\b/.test(cmd)) await refreshProjectFiles();
-      }
-    } catch (err) {
-      clearInterval(tick);
-      waiting.remove();
-      termPrint('Could not reach the backend: ' + (err.message || err), 't-err');
-    }
-    termBusy = false;
-    termInput.disabled = false;
-    termPrompt.textContent = promptText();
-    termInput.focus();
-  }
-
-  // After the terminal creates/removes files, reflect that in the file tree without losing unsaved edits.
-  async function refreshProjectFiles() {
-    if (!currentProjectId || !authToken) return;
-    try {
-      const res = await fetch(api('/projects/' + currentProjectId), { headers: { 'X-Session-Token': authToken } });
-      const data = await res.json();
-      if (!res.ok) return;
-      const keep = currentFile, keepText = editor.value;
-      const fresh = {};
-      (data.files || []).forEach(f => { fresh[f.filename] = { lang: langFromFilename(f.filename), content: f.content }; savedContent[f.filename] = f.content; });
-      activeFiles = fresh;
-      if (keep && fresh[keep]) { fresh[keep].content = keepText; renderFileTree(); }
-      else { const first = Object.keys(fresh)[0]; if (first) loadFile(first); else showEmptyProjectState(); }
-    } catch (err) { /* the file tree just stays as it was */ }
-  }
-
-  termInput.addEventListener('keydown', (e) => {
-    if (termBusy) return;
-    if (e.key === 'Enter') {
-      const v = termInput.value;
-      termInput.value = '';
-      runTerminalCommand(v);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      if (termHistIdx > 0) termInput.value = termHistory[--termHistIdx];
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      termHistIdx = Math.min(termHistIdx + 1, termHistory.length);
-      termInput.value = termHistory[termHistIdx] || '';
-    } else if (e.key === 'l' && e.ctrlKey) {
-      e.preventDefault();
-      termScreen.innerHTML = '';
-    }
+  editor.addEventListener('input', () => {
+    if (!activeProgram) return;
+    activeProgram.code = editor.value;
+    activeProgram.updatedAt = Date.now();
+    updateEditorMeta();
+    setSaving();
   });
-  document.getElementById('term-screen').addEventListener('click', () => { if (!window.getSelection().toString()) termInput.focus(); });
-  document.querySelectorAll('#term-chips button').forEach(b => b.addEventListener('click', () => {
-    const c = b.dataset.cmd;
-    if (c.endsWith(' ')) { termInput.value = c; termInput.focus(); }
-    else runTerminalCommand(c);
-  }));
-
-  resetTerminal();
-
-  // ---- home screen (workbench) ----
-  const LAUNCH = [
-    { id: 'python', glyph: 'Py', cls: 'g-py', file: 'main.py' },
-    { id: 'javascript', glyph: 'JS', cls: 'g-js', file: 'app.js' },
-    { id: 'java', glyph: 'Java', cls: 'g-java', file: 'Main.java' },
-    { id: 'c', glyph: 'C', cls: 'g-c', file: 'main.c' },
-    { id: 'cpp', glyph: 'C++', cls: 'g-cpp', file: 'main.cpp' }
-  ];
-  let certProgress = null;
-  let problemsRequested = false;
-
-  function cleanVersion(v) {
-    const m = /\d+(?:\.\d+)+/.exec(v || '');
-    return m ? m[0] : (v || '');
-  }
-
-  function renderDashboard() {
-    const launch = document.getElementById('launch');
-    if (!launch) return;
-    document.getElementById('wb-title').textContent = currentUsername ? 'Welcome back, ' + currentUsername + '.' : 'What are you building today?';
-
-    // launch bar: real versions straight from the backend
-    const byId = {};
-    ((lastSandboxes && lastSandboxes.sandboxes) || []).forEach(sb => { byId[sb.id] = sb; });
-    launch.innerHTML = LAUNCH.map(l => {
-      const sb = byId[l.id];
-      const missing = !!(lastSandboxes && sb && !sb.available);
-      const measured = !sb || sb.verified !== false;               // an inferred "missing" must not block anyone from trying
-      const blocked = missing && measured;
-      const state = !lastSandboxes ? (sbState === 'down' ? 'Backend unreachable' : 'Checking') : (missing ? (measured ? 'Not installed on this server' : 'Needs one-time setup') : (sb ? 'Ready' : ''));
-      return '<button class="launch-tile' + (missing ? ' missing' : '') + '" data-lang="' + l.id + '"' + (blocked ? ' disabled' : '') + '>' +
-        '<span class="launch-glyph ' + l.cls + '">' + l.glyph + '</span>' +
-        '<span class="launch-name">' + LANG_LABEL[l.id] + '</span>' +
-        '<span class="launch-ver">' + escapeHtml(sb && sb.version ? cleanVersion(sb.version) : '') + '&nbsp;</span>' +
-        '<span class="launch-state">' + state + '</span></button>';
-    }).join('');
-
-    renderResume();
-    renderPractice();
-    renderProve();
-    renderRuntimes();
-  }
-
-  function renderResume() {
-    const el = document.getElementById('resume-body');
-    if (backendFeatures && backendFeatures.accounts === false) {
-      el.innerHTML = '<p class="wb-empty">This backend runs code only, so projects are not saved here. The sample files in the editor run exactly the same way.</p>';
-    } else if (!currentUsername) {
-      el.innerHTML = '<p class="wb-empty">Log in to save projects and pick up where you left off. Until then, the sample files in the editor are yours to run and change.</p><button class="btn btn-sm" id="wb-login">Log in</button>';
-      const b = document.getElementById('wb-login');
-      if (b) b.addEventListener('click', () => { const t = document.getElementById('auth-toggle-btn'); const panel = document.getElementById('auth-panel'); if (panel && panel.style.display === 'none') t.click(); const u = document.getElementById('auth-username'); if (u) u.focus(); });
-    } else if (!myProjects.length) {
-      el.innerHTML = '<p class="wb-empty">You have no projects yet. A project holds several files that build and run together.</p><button class="btn btn-sm" id="wb-new">Create a project</button>';
-      const b = document.getElementById('wb-new');
-      if (b) b.addEventListener('click', () => { switchView('ide'); document.getElementById('new-project-btn').click(); });
-    } else {
-      el.innerHTML = myProjects.slice(0, 6).map(p => '<button class="row-link" data-project="' + p.id + '"><span>' + escapeHtml(p.name) + '</span><small>Open</small></button>').join('');
-    }
-  }
-
-  function renderPractice() {
-    const el = document.getElementById('practice-body');
-    const list = Object.values(problemsData || {});
-    if (!backendUrl) { el.innerHTML = '<p class="wb-empty">Connect a backend to load problems.</p>'; return; }
-    if (!list.length) {
-      el.innerHTML = '<p class="wb-empty">Loading problems…</p>';
-      if (!problemsRequested) { problemsRequested = true; loadProblems(); }
-      return;
-    }
-    el.innerHTML = list.slice(0, 5).map(p => '<button class="row-link" data-problem="' + escapeHtml(p.id) + '"><span>' + escapeHtml(p.title) + '</span><small class="diff-pill diff-' + escapeHtml(p.difficulty) + '">' + escapeHtml(p.difficulty) + '</small></button>').join('') +
-      '<button class="row-link" data-view-go="problems"><span>All problems</span><small>Judged on hidden tests</small></button>';
-  }
-
-  async function renderProve() {
-    const el = document.getElementById('prove-body');
-    if (backendFeatures && backendFeatures.accounts === false) {
-      el.innerHTML = '<p class="wb-empty">Certificates are issued by the full DracoSkill backend. This one only runs code.</p>';
-      return;
-    }
-    if (!currentUsername || !backendUrl) {
-      el.innerHTML = '<p class="wb-empty">Solve every problem in the set and DracoSkill issues a certificate with a link anyone can check. Log in to start counting.</p>';
-      return;
-    }
-    if (certProgress && certProgress.user === currentUsername) { paintProve(certProgress.data); return; }
-    el.innerHTML = '<p class="wb-empty">Loading your progress…</p>';
-    try {
-      const res = await fetch(api('/certificates/progress'), { headers: { 'X-Session-Token': authToken || '' } });
-      const data = await res.json();
-      if (!res.ok) { el.innerHTML = '<p class="wb-empty">' + escapeHtml(data.error || 'Could not load your progress.') + '</p>'; return; }
-      certProgress = { user: currentUsername, data: data };
-      paintProve(data);
-    } catch (e) { el.innerHTML = '<p class="wb-empty">Could not load your progress.</p>'; }
-  }
-  function paintProve(d) {
-    const pct = d.problems_total ? Math.round(d.problems_solved / d.problems_total * 100) : 0;
-    document.getElementById('prove-body').innerHTML =
-      '<div class="meter" role="img" aria-label="' + pct + ' percent"><i style="width:' + pct + '%"></i></div>' +
-      '<p style="margin:0"><strong>' + d.problems_solved + ' of ' + d.problems_total + '</strong> problems solved</p>' +
-      '<button class="btn btn-sm" style="margin-top:14px" data-view-go="certs">' + (d.eligible ? 'Get your certificate' : 'See requirements') + '</button>';
-  }
-
-  function renderRuntimes() {
-    const list = document.getElementById('rt-list');
-    const note = document.getElementById('rt-note');
-    if (!lastSandboxes || !lastSandboxes.sandboxes) {
-      list.innerHTML = '<div class="rt-empty">' + (!backendUrl ? 'No backend connected.' : sbState === 'loading' ? 'Checking the backend…' : 'Could not reach the backend. Check its address in the Editor tab.') + '</div>';
-      note.textContent = '';
-      return;
-    }
-    list.innerHTML = lastSandboxes.sandboxes.map(sb =>
-      '<div class="rt-row"><b>' + escapeHtml(sb.id === 'terminal' ? 'Terminal' : sb.label) + '</b>' +
-      '<span class="rt-ver">' + escapeHtml(sb.version ? cleanVersion(sb.version) : (sb.available ? 'ready' : '')) + '</span>' +
-      '<span class="rt-net">Network ' + escapeHtml(sb.network || '') + '</span>' +
-      '<span class="chip ' + (sb.available ? 'ready' : (sb.verified === false ? 'partial' : 'down')) + '">' + (sb.available ? 'Ready' : (sb.verified === false ? 'Needs setup' : 'Not available')) + '</span></div>').join('');
-    const missing = lastSandboxes.sandboxes.filter(sb => sb.id !== 'terminal' && !sb.available);
-    const vercel = lastSandboxes.isolation && lastSandboxes.isolation.driver === 'vercel-sandbox';
-    if (missing.length && vercel) {
-      note.innerHTML = escapeHtml(missing.map(m => m.label).join(', ')) + ' need a one-time setup. <a href="' + escapeHtml(backendUrl.replace(/\/$/, '')) + '/setup" target="_blank" rel="noopener">Open the setup page</a>';
-    } else if (missing.length) {
-      note.textContent = missing.map(m => m.label).join(', ') + ' not installed on this server.';
-    } else { note.textContent = ''; }
-  }
-
-  function launchLanguage(id) {
-    const l = LAUNCH.find(x => x.id === id);
-    switchView('ide');
-    if (currentProjectId && authToken) {
-      const inp = document.getElementById('new-file-name');
-      inp.value = l.file; inp.focus(); inp.select();
-    } else if (!authToken) {
-      activeFiles = demoFiles;
-      loadFile(l.file);
+  languageSelect.addEventListener('change', (event) => setLanguage(event.target.value));
+  runButton.addEventListener('click', runCode);
+  $('new-program-button').addEventListener('click', () => createProgram());
+  $('share-button').addEventListener('click', shareProgram);
+  $('download-button').addEventListener('click', downloadProgram);
+  $('reset-button').addEventListener('click', resetProgram);
+  $('clear-button').addEventListener('click', () => {
+    if (!editor.value || window.confirm('Clear all source code in this program?')) {
+      editor.value = '';
+      activeProgram.code = '';
+      setSaving();
+      clearConsole();
       editor.focus();
     }
-  }
-
-  document.getElementById('view-dashboard').addEventListener('click', (e) => {
-    const tile = e.target.closest('.launch-tile');
-    if (tile && !tile.disabled) { launchLanguage(tile.dataset.lang); return; }
-    const proj = e.target.closest('[data-project]');
-    if (proj) { const id = Number(proj.dataset.project); document.getElementById('project-select').value = String(id); switchView('ide'); selectProject(id); return; }
-    const prob = e.target.closest('[data-problem]');
-    if (prob) { switchView('problems'); setTimeout(() => selectProblem(prob.dataset.problem), 0); return; }
-    const go = e.target.closest('[data-view-go]');
-    if (go) switchView(go.dataset.viewGo);
+  });
+  $('clear-output-button').addEventListener('click', () => clearConsole());
+  $('toggle-input-button').addEventListener('click', () => {
+    const button = $('toggle-input-button');
+    const wrap = $('stdin-wrap');
+    const open = button.getAttribute('aria-expanded') !== 'true';
+    button.setAttribute('aria-expanded', String(open));
+    wrap.hidden = !open;
+    if (open) $('stdin-input').focus();
+  });
+  $('mobile-menu-button').addEventListener('click', () => {
+    const sidebar = $('file-sidebar');
+    const open = sidebar.classList.toggle('open');
+    $('mobile-menu-button').setAttribute('aria-expanded', String(open));
   });
 
-  // ---- console: drag to resize (remembered), arrow keys too ----
-  (function () {
-    const col = document.getElementById('editor-col'), rz = document.getElementById('resizer');
-    try { const h = localStorage.getItem('draco-console-h'); if (h) col.style.setProperty('--console-h', h + 'px'); } catch (e) { /* storage blocked: fine */ }
-    function set(h) {
-      h = Math.max(120, Math.min(h, col.clientHeight - 200));
-      col.style.setProperty('--console-h', h + 'px');
-      try { localStorage.setItem('draco-console-h', String(Math.round(h))); } catch (e) { /* ignore */ }
+  document.addEventListener('keydown', (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      event.preventDefault();
+      runCode();
+    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      if (activeProgram) activeProgram.code = editor.value;
+      persist();
+      showToast('Program saved on this device.');
     }
-    rz.addEventListener('pointerdown', (e) => {
-      rz.setPointerCapture(e.pointerId); rz.classList.add('drag');
-      const y0 = e.clientY, h0 = consoleEl.getBoundingClientRect().height;
-      const move = (ev) => set(h0 + (y0 - ev.clientY));
-      const up = () => { rz.classList.remove('drag'); rz.removeEventListener('pointermove', move); rz.removeEventListener('pointerup', up); };
-      rz.addEventListener('pointermove', move); rz.addEventListener('pointerup', up);
-    });
-    rz.addEventListener('keydown', (e) => {
-      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
-      e.preventDefault();
-      set(consoleEl.getBoundingClientRect().height + (e.key === 'ArrowUp' ? 24 : -24));
-    });
-  })();
-
-  document.getElementById('conn-btn').addEventListener('click', () => {
-    connectRow.style.display = connectRow.style.display === 'none' ? 'flex' : 'none';
-    if (connectRow.style.display === 'flex') document.getElementById('backend-url').focus();
+  });
+  window.addEventListener('online', checkBackend);
+  window.addEventListener('offline', () => {
+    updateConnection('offline', 'Offline', 'Backend: offline');
+    setRuntimeState(null);
+    showToast('Offline mode: keep editing. Your changes are saved locally.');
+  });
+  window.addEventListener('pagehide', () => {
+    if (activeProgram) activeProgram.code = editor.value;
+    persist();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      if (activeProgram) activeProgram.code = editor.value;
+      persist();
+    }
   });
 
-  renderDashboard();
-  loadSandboxes();
-
-  // deep links from the landing page: /app/#problems, /app/#editor, /app/#certificates
-  (function () {
-    var map = { problems: 'problems', editor: 'ide', ide: 'ide', certificates: 'certs', certs: 'certs' };
-    var v = map[(location.hash || '').replace('#', '')];
-    if (v) switchView(v);
-  })();
+  initAccount().catch(e => console.error('Draco account initialization failed', e));
+  checkBackend();
+  registerServiceWorker();
+})();
