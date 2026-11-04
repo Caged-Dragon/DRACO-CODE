@@ -51,3 +51,16 @@ The existing database already contains the `code_consume_run` and `code_record_e
 ## Accounts and packages
 
 Guests can execute Python and JavaScript. Signed-in users can add Java, C and C++ from the sandwich menu. Language grants and package selections are saved per user in the existing CAGED_DRAGON Supabase project with row-level security. Package downloads use a temporary, registry-restricted network window; user code runs only after the sandbox network policy is restored to deny-all.
+
+
+## Environment variable setup
+
+The frontend is a static site, so its Vercel build runs `frontend/scripts/build.mjs` and generates `dist/assets/config.js` from these Vercel variables:
+
+- `DRACO_BACKEND_URL` — public API origin.
+- `SUPABASE_URL` — public Supabase project URL.
+- `SUPABASE_ANON_KEY` — public Supabase publishable/anon key only.
+
+Set the same three values on both existing Vercel projects for each environment (Production, Preview, Development). The frontend build embeds them in the browser bundle; the backend reads the Supabase values server-side. The backend also requires `CODE_BACKEND_SHARED_SECRET` and `CODE_RATE_LIMIT_SECRET`; never add those to the frontend project. Never put a Supabase secret/service-role key in the frontend. Vercel environment-variable changes require a new deployment.
+
+For local frontend builds, export those three variables before running `node scripts/build.mjs` from `frontend/`. The tracked `assets/config.js` is only a localhost fallback and intentionally contains no Supabase key.

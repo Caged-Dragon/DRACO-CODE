@@ -22,7 +22,7 @@ The only execution languages accepted by the Vercel API are `python`, `javascrip
 
 Use Node.js 24.x (the Vercel projects are configured for Node 24). Install the pinned dependencies from `package-lock.json`, link the existing backend Vercel project, and use `vercel dev --listen 8787` with local values from `.env.example`. For a browser served on localhost, `frontend/assets/config.js` selects `http://localhost:8787`; production always selects the official backend alias.
 
-Never put actual secrets in source control. `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `CODE_BACKEND_SHARED_SECRET` and `CODE_RATE_LIMIT_SECRET` are backend-only. The API validates the Supabase hostname against the existing `CAGED_DRAGON` project and fails closed if production database configuration is missing.
+Never put actual secrets in source control. `SUPABASE_URL` and `SUPABASE_ANON_KEY` are public project configuration shared with the frontend. `CODE_BACKEND_SHARED_SECRET` and `CODE_RATE_LIMIT_SECRET` are backend-only secrets. The API validates the Supabase hostname against the existing `CAGED_DRAGON` project and fails closed if production database configuration is missing.
 
 ## Execution security
 

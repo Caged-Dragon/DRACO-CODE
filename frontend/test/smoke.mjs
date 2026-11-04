@@ -44,6 +44,7 @@ assert.match(app, /cpp: \{ label: 'C\+\+', extension: '\.cpp'/);
 
 console.log(`Frontend static smoke passed: ${ids.size} DOM IDs, ${referenced.size} code references, all shell assets present, five language starters, no install/manifest code.`);
 
-assert.ok(existsSync(resolve(root, 'scripts/build.mjs')), 'environment-driven Vercel build script missing');
-const configSource = readFileSync(resolve(root, 'assets/config.js'), 'utf8');
-assert.doesNotMatch(configSource, /sb_publishable_[A-Za-z0-9_-]{20,}/, 'public Supabase key should come from Vercel env at build time');
+await access(path.join(root, 'scripts/build.mjs'));
+assert.doesNotMatch(config, /sb_publishable_[A-Za-z0-9_-]{20,}/, 'public Supabase key should come from Vercel env at build time');
+assert.match(app, /window\.DRACOCODE_CONFIG\?\.SUPABASE_URL/);
+assert.match(app, /window\.DRACOCODE_CONFIG\?\.SUPABASE_ANON_KEY/);
