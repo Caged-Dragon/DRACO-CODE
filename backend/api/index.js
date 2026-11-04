@@ -167,7 +167,7 @@ async function userRows(table,userId,token,config,columns){
   if(!response.ok)throw new Error('Could not load account compiler settings.');return response.json();
 }
 function validatedPackages(language,rows){
-  const py=/^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/,npm=/^(?:@[a-z0-9][a-z0-9._-]{0,49}\\/)?[a-z0-9][a-z0-9._-]{0,99}$/i,maven=/^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$/;
+  const py=/^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/,npm=/^(?:@[a-z0-9][a-z0-9._-]{0,49}\/)?[a-z0-9][a-z0-9._-]{0,99}$/i,maven=/^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$/;
   const c=new Set(['libsqlite3-dev','libssl-dev','libcurl4-openssl-dev']),cpp=new Set(['nlohmann-json3-dev','libboost-dev','libeigen3-dev','libfmt-dev']);
   return rows.filter(r=>{const n=String(r.package_name||''),v=String(r.package_version||'');if(v&&!/^[A-Za-z0-9.+_-]{1,80}$/.test(v))return false;if(language==='python')return py.test(n);if(language==='javascript')return npm.test(n);if(language==='java')return maven.test(n);if(language==='c')return c.has(n);if(language==='cpp')return cpp.has(n);return false;}).map(r=>({name:r.package_name,version:r.package_version||''})).slice(0,20);
 }
