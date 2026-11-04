@@ -44,3 +44,10 @@ npm run test:all
 `npm test` runs the backend runner/API tests with a local fake Sandbox adapter. These tests verify our orchestration and request validation but do not test Vercel's cloud microVM infrastructure. `npm run test:frontend` checks frontend DOM references, shell assets, language starter metadata and absence of install/manifest code. After deployment, use `/selfcheck` and actual `/execute` calls to test the real Vercel Sandbox runtime for all five languages.
 
 The separate `python-server/` directory is an optional historical full Python/SQLite service. It is not used by either Vercel project and is not on the production execution request path.
+
+
+## Accounts, languages and packages
+
+Supabase Auth provides email/password accounts. Guests can run Python and JavaScript only. Signed-in users can add Java, C and C++ to their own account. The API validates the bearer session with Supabase Auth and checks the per-user language row before creating a sandbox; frontend-only locks are not trusted.
+
+The side panel stores language and package selections in `draco_user_languages` and `draco_user_packages`, protected by owner-only RLS. Python packages are installed from PyPI and JavaScript packages from npm in a fresh sandbox. Java dependencies use Maven Central coordinates (`group:artifact:version`). C/C++ packages are limited to a curated Ubuntu development-library catalogue. During dependency installation, egress is restricted to the appropriate package hosts and is reset to `deny-all` before user code is compiled or executed. Package installation occurs per run and can add startup time.

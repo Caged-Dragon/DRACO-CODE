@@ -46,3 +46,8 @@ Use the two existing Vercel projects connected to `Caged-Dragon/DRACO-CODE`:
 The backend production environment must contain the keys listed in `backend/.env.example`. Keep `CODE_BACKEND_SHARED_SECRET`, `CODE_RATE_LIMIT_SECRET`, and all Supabase credentials private to the backend project. The frontend only calls the fixed public API URL in `frontend/assets/config.js`.
 
 The existing database already contains the `code_consume_run` and `code_record_execution` RPC functions and the `code_rate_limit_windows` / `code_execution_events` tables. Do not recreate the database or apply destructive migrations.
+
+
+## Accounts and packages
+
+Guests can execute Python and JavaScript. Signed-in users can add Java, C and C++ from the sandwich menu. Language grants and package selections are saved per user in the existing CAGED_DRAGON Supabase project with row-level security. Package downloads use a temporary, registry-restricted network window; user code runs only after the sandbox network policy is restored to deny-all.

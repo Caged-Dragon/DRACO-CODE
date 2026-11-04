@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="./assets/design.css">
   <link rel="stylesheet" href="./app/styles.css">
   <script src="./assets/theme.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4"></script>
   <title>Draco Code — Online Compiler</title>
 </head>
 <body>
@@ -24,6 +25,7 @@
         <span class="brand-caption">CAGED DRAGON</span>
       </a>
 
+      <button class="icon-button account-menu-button" id="account-menu-button" type="button" aria-label="Open account and packages panel" aria-expanded="false" title="Account, languages and packages"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
       <div class="topbar-actions">
         <span id="connection-chip" class="connection-chip checking" role="status" aria-live="polite">
           <span class="connection-dot"></span><span id="connection-label">Connecting</span>
@@ -129,6 +131,35 @@
     </footer>
   </div>
 
+  <aside class="account-panel" id="account-panel" aria-label="Account, languages and packages" aria-hidden="true">
+    <div class="account-panel-head"><div><span class="eyebrow">DRACO ACCOUNT</span><h2>Languages & packages</h2></div><button class="icon-button" id="account-panel-close" type="button" aria-label="Close panel">×</button></div>
+    <div id="account-guest" class="account-auth">
+      <p class="account-copy">Sign in to unlock Java, C and C++ and keep your language and package setup with your account.</p>
+      <label for="account-email">Email</label><input id="account-email" type="email" autocomplete="email" placeholder="you@example.com">
+      <label for="account-password">Password</label><input id="account-password" type="password" autocomplete="current-password" placeholder="At least 8 characters">
+      <div class="account-auth-actions"><button class="panel-primary" id="account-signin" type="button">Sign in</button><button class="panel-secondary" id="account-signup" type="button">Create account</button></div>
+      <p id="account-auth-message" class="account-message" role="status"></p>
+      <div class="guest-access-note"><strong>Guest access</strong><span>Python and JavaScript are ready without an account.</span></div>
+    </div>
+    <div id="account-user" hidden>
+      <div class="account-user-card"><span class="account-avatar" id="account-avatar">D</span><div><strong id="account-user-email">Signed in</strong><span>Personal compiler workspace</span></div><button class="panel-secondary" id="account-signout" type="button">Sign out</button></div>
+      <section class="panel-section"><div class="panel-section-head"><div><h3>Add languages</h3><p>Unlock another compiler for this account.</p></div></div><div class="language-add-grid">
+        <button type="button" data-add-language="java"><span>Java</span><small>JDK compiler</small><b>＋</b></button>
+        <button type="button" data-add-language="c"><span>C</span><small>GCC compiler</small><b>＋</b></button>
+        <button type="button" data-add-language="cpp"><span>C++</span><small>G++ compiler</small><b>＋</b></button>
+      </div><div id="installed-language-list" class="installed-list"></div></section>
+      <section class="panel-section"><div class="panel-section-head"><div><h3>Add packages</h3><p>Packages are installed into an isolated run environment.</p></div></div>
+        <label for="package-language">Language</label><select id="package-language" class="panel-select"><option value="python">Python</option><option value="javascript">JavaScript</option></select>
+        <label for="package-name">Package name</label><input id="package-name" type="text" autocomplete="off" placeholder="e.g. pandas or lodash">
+        <label for="package-version">Version <span class="optional-label">optional</span></label><input id="package-version" type="text" autocomplete="off" placeholder="Latest version">
+        <button class="panel-primary panel-wide" id="account-add-package" type="button">Add package</button>
+        <div class="package-suggestions" id="package-suggestions"></div>
+        <div id="installed-package-list" class="installed-list"></div>
+      </section>
+    </div>
+    <div class="account-panel-foot">Package downloads are restricted to trusted registries during setup. User code runs after sandbox network access is locked down.</div>
+  </aside>
+  <div class="account-panel-scrim" id="account-panel-scrim" hidden></div>
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
   <script src="./assets/config.js"></script>
   <script src="./assets/highlight.js"></script>

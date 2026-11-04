@@ -155,6 +155,22 @@ function bodyObject(req) {
   return null;
 }
 
+async function authenticatedUser(req, config) {
+  const match=/^Bearer\\s+([A-Za-z0-9._~-]+)$/i.exec(String(req.headers?.authorization||'')); if(!match)return null;
+  const response=await fetch(`${config.url}/auth/v1/user`,{headers:{apikey:config.anonKey,Authorization:`Bearer ${match[1]}`},signal:AbortSignal.timeout(7000)});
+  if(!response.ok)throw new Error('Invalid or expired account session.'); const user=await response.json();
+  return user&&typeof user.id==='string'?{user,token:match[1]}:null;
+}
+async function userRows(table,userId,token,config,columns){
+  const url=new URL(`${config.url}/rest/v1/${table}`);url.searchParams.set('select',columns);url.searchParams.set('user_id',`eq.${userId}`);
+  const response=await fetch(url,{headers:{apikey:config.anonKey,Authorization:`Bearer ${token}`,Accept:'application/json'},signal:AbortSignal.timeout(7000)});
+  if(!response.ok)throw new Error('Could not load account compiler settings.');return response.json();
+}
+function validatedPackages(language,rows){
+  const py=/^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/,npm=/^(?:@[a-z0-9][a-z0-9._-]{0,49}\\/)?[a-z0-9][a-z0-9._-]{0,99}$/i,maven=/^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$/;
+  const c=new Set(['libsqlite3-dev','libssl-dev','libcurl4-openssl-dev']),cpp=new Set(['nlohmann-json3-dev','libboost-dev','libeigen3-dev','libfmt-dev']);
+  return rows.filter(r=>{const n=String(r.package_name||''),v=String(r.package_version||'');if(v&&!/^[A-Za-z0-9.+_-]{1,80}$/.test(v))return false;if(language==='python')return py.test(n);if(language==='javascript')return npm.test(n);if(language==='java')return maven.test(n);if(language==='c')return c.has(n);if(language==='cpp')return cpp.has(n);return false;}).map(r=>({name:r.package_name,version:r.package_version||''})).slice(0,20);
+}
 function safeRunMetrics(body, result, status) {
   const code = typeof body.code === 'string' ? body.code : '';
   const stdin = typeof body.stdin === 'string' ? body.stdin : '';
@@ -233,6 +249,10 @@ export default async function handler(req, res) {
       const production = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
       if (!config && production) return send(res, 503, { error: 'Execution service is not configured. Please contact the site operator.' });
 
+      let userContext=null, packages=[];
+      if(req.headers?.authorization){try{userContext=await authenticatedUser(req,config);}catch{return send(res,401,{error:'Your sign-in session is invalid. Please sign in again.'});}if(!userContext)return send(res,401,{error:'Sign in to use account features.'});}
+      if(!['python','javascript'].includes(body.language)){if(!userContext)return send(res,401,{error:'Sign in to unlock Java, C and C++.'});try{const rows=await userRows('draco_user_languages',userContext.user.id,userContext.token,config,'language');if(!rows.some(row=>row.language===body.language))return send(res,403,{error:'Add this language to your account before running it.'});}catch{return send(res,503,{error:'Could not verify your installed languages. Please retry.'});}}
+      if(userContext){try{const rows=await userRows('draco_user_packages',userContext.user.id,userContext.token,config,'language,package_name,package_version');packages=validatedPackages(body.language,rows.filter(row=>row.language===body.language));}catch{return send(res,503,{error:'Could not load your package list. Please retry.'});}}
       const requestId = randomUUID();
       const fingerprint = config
         ? requestFingerprint(req, config.fingerprintSecret)
@@ -262,7 +282,7 @@ export default async function handler(req, res) {
         return send(res, 429, { error: 'Too many runs. Please wait a minute.' });
       }
 
-      const [result, status] = await execute(body.language, body.code, body.stdin || '');
+      const [result, status] = await execute(body.language, body.code, body.stdin || '', undefined, {packages});
       res.setHeader('X-Request-Id', requestId);
       if (config) {
         const metrics = safeRunMetrics(body, result, status);

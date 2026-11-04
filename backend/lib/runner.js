@@ -42,7 +42,7 @@ export function snippetFile(language, code) {
 }
 
 export class RunSession {
-  constructor(language, code, factory = getFactory()) {
+  constructor(language, code, factory = getFactory(), packages = []) {
     this.language = language;
     this.code = code;
     this.factory = factory;
@@ -54,9 +54,33 @@ export class RunSession {
 
   async open() {
     this.sb = await this.factory();
-    await this.sb.writeFiles([{ path: `${ROOT}/${this.file}`, content: Buffer.from(this.code, 'utf8') }]);
+    await this.sb.writeFiles([{ path: `${ROOT}/${this.file}`, content: Buffer.from(this.code, 'utf8') }]);\n    await this.installPackages();
   }
 
+  async installPackages() {
+    if (!this.packages.length) return;
+    const sb=this.sb, language=this.language;
+    const specs=this.packages.map(p=>({name:String(p.name||''),version:String(p.version||'')}));
+    if (language==='python') {
+      await sb.update({networkPolicy:{allow:['pypi.org','files.pythonhosted.org']}});
+      const args=['install','--disable-pip-version-check','--no-input','--target',`${ROOT}/.draco-python`,...specs.map(p=>p.name+(p.version?'=='+p.version:''))];
+      const result=await sb.runCommand({cmd:'python3',args}); if(result.exitCode!==0) throw new Error('Python package installation failed. Check package names and versions.');
+    } else if (language==='javascript') {
+      await sb.update({networkPolicy:{allow:['registry.npmjs.org']}});
+      const args=['install','--ignore-scripts','--no-audit','--no-fund','--prefix',`${ROOT}/.draco-node`,...specs.map(p=>p.name+(p.version?'@'+p.version:''))];
+      const result=await sb.runCommand({cmd:'npm',args}); if(result.exitCode!==0) throw new Error('JavaScript package installation failed. Check package names and versions.');
+    } else if (language==='java') {
+      await sb.update({networkPolicy:{allow:['repo.maven.apache.org']}}); await sb.runCommand({cmd:'mkdir',args:['-p',`${ROOT}/.draco-java`]});
+      for(const p of specs){const [group,artifact,version]=p.name.split(':');if(!group||!artifact||!version||![group,artifact,version].every(x=>/^[A-Za-z0-9_.-]+$/.test(x)))throw new Error('Java packages must use group:artifact:version coordinates.');const url=`https://repo.maven.apache.org/maven2/${group.replace(/\./g,'/')}/${artifact}/${version}/${artifact}-${version}.jar`;const result=await sb.runCommand({cmd:'curl',args:['-fsSL',url,'-o',`${ROOT}/.draco-java/${artifact}-${version}.jar`]});if(result.exitCode!==0)throw new Error(`Could not download Java dependency ${p.name}.`);}
+    } else if (language==='c'||language==='cpp') {
+      const allowed=language==='c'?new Set(['libsqlite3-dev','libssl-dev','libcurl4-openssl-dev']):new Set(['nlohmann-json3-dev','libboost-dev','libeigen3-dev','libfmt-dev']);
+      if(specs.some(p=>!allowed.has(p.name)))throw new Error('This C/C++ package is not in the supported system-library catalogue.');
+      await sb.update({networkPolicy:{allow:['archive.ubuntu.com','security.ubuntu.com','ports.ubuntu.com','packages.ubuntu.com']}});
+      const update=await sb.runCommand({cmd:'apt-get',args:['update','-qq'],sudo:true});if(update.exitCode!==0)throw new Error('Could not refresh the C/C++ package catalogue.');
+      const install=await sb.runCommand({cmd:'apt-get',args:['install','-y','--no-install-recommends',...specs.map(p=>p.name)],sudo:true});if(install.exitCode!==0)throw new Error('C/C++ package installation failed.');
+    }
+    await sb.update({networkPolicy:'deny-all'});
+  }
   async close() {
     try { await this.sb?.stop(); } catch { /* already stopped / expired */ }
   }
@@ -102,7 +126,7 @@ export class RunSession {
     const l = this.language;
     if (l === 'java') {
       if (!/^[A-Za-z_]\w*$/.test(this.cls)) return { error: 'Invalid Java class name.' };
-      return this.phase('compile', `mkdir -p build && javac -nowarn -encoding UTF-8 -J-Xmx256m -J-XX:+UseSerialGC -d build ${this.file}`, { timeoutSec: COMPILE_TIMEOUT });
+      return this.phase('compile', `mkdir -p build && javac -nowarn -encoding UTF-8 -J-Xmx256m -J-XX:+UseSerialGC -cp '.draco-java/*' -d build ${this.file}`, { timeoutSec: COMPILE_TIMEOUT });
     }
     if (l === 'c') return this.phase('compile', `gcc -std=gnu17 -O1 -Wall -pipe -o app ${this.file} -lm -lpthread`, { timeoutSec: COMPILE_TIMEOUT });
     if (l === 'cpp') return this.phase('compile', `g++ -std=gnu++17 -O1 -Wall -pipe -o app ${this.file} -lm -lpthread`, { timeoutSec: COMPILE_TIMEOUT });
@@ -111,9 +135,9 @@ export class RunSession {
 
   runCommandText() {
     switch (this.language) {
-      case 'python': return `python3 ${this.file}`;
-      case 'javascript': return `node ${this.file}`;
-      case 'java': return `java ${JAVA_FLAGS} -cp build ${this.cls}`;
+      case 'python': return `PYTHONPATH=${ROOT}/.draco-python:${'${PYTHONPATH:-}'} python3 ${this.file}`;
+      case 'javascript': return `NODE_PATH=${ROOT}/.draco-node/node_modules:${'${NODE_PATH:-}'} node ${this.file}`;
+      case 'java': return `java ${JAVA_FLAGS} -cp 'build:.draco-java/*' ${this.cls}`;
       default: return './app';
     }
   }
@@ -146,13 +170,13 @@ export function compileFailure(c) {
 }
 
 // Single snippet. Returns [result, httpStatus].
-export async function execute(language, code, stdin = '', factory = getFactory()) {
+export async function execute(language, code, stdin = '', factory = getFactory(), options = {}) {
   if (!RUN_LANGUAGES.includes(language)) return [{ error: `Unsupported language: ${language}. Supported: ${RUN_LANGUAGES.join(', ')}.` }, 400];
   if (typeof code !== 'string' || !code.trim()) return [{ error: 'No code submitted' }, 400];
   if (code.length > MAX_CODE) return [{ error: 'Code is too large (200 KB max).' }, 413];
   if ((stdin || '').length > MAX_STDIN) return [{ error: 'Input is too large (100 KB max).' }, 413];
 
-  const s = new RunSession(language, code, factory);
+  const packages = Array.isArray(options.packages) ? options.packages : [];\n  const s = new RunSession(language, code, factory, packages);
   try {
     await s.open();
     const c = await s.prepare();

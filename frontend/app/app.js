@@ -4,6 +4,10 @@
   const BACKEND_URL = String(window.DRACOCODE_CONFIG?.BACKEND_URL || window.DRACOSKILL_CONFIG?.BACKEND_URL || 'https://draco-code-backend.vercel.app').replace(/\/$/, '');
   const STORAGE_KEY = 'draco-code-workspace-v1';
   const MAX_PROGRAMS = 30;
+  const SUPABASE_URL = 'https://gbeurqibcfvquacasofq.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_nsSCuh8LeO3ug4CjHbeZuw_O-d4IMCM';
+  const supabaseClient = window.supabase?.createClient ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }) : null;
+  let accountSession = null, accountUser = null, installedLanguages = new Set(), installedPackages = [], accountBusy = false;
   const LANGUAGES = {
     python: { label: 'Python', extension: '.py', file: 'main.py', dot: 'python', starter: 'def main():\n    print("Hello from Draco Code")\n\nif __name__ == "__main__":\n    main()\n' },
     javascript: { label: 'JavaScript', extension: '.js', file: 'main.js', dot: 'javascript', starter: 'function main() {\n  console.log("Hello from Draco Code");\n}\n\nmain();\n' },
@@ -467,6 +471,97 @@
       showToast('That share link could not be decoded.');
       return false;
     }
+  }
+
+
+  const PACKAGE_CATALOG = {
+    python: ['numpy','pandas','matplotlib','requests','scipy','pillow','sympy','beautifulsoup4','flask','pytest'],
+    javascript: ['lodash','axios','dayjs','uuid','zod','chalk','express','date-fns','cheerio','mathjs'],
+    java: ['org.json:json:20240303','com.google.code.gson:gson:2.11.0'],
+    c: ['libsqlite3-dev','libssl-dev','libcurl4-openssl-dev'],
+    cpp: ['nlohmann-json3-dev','libboost-dev','libeigen3-dev','libfmt-dev']
+  };
+  const LABELS = { python:'Python', javascript:'JavaScript', java:'Java', c:'C', cpp:'C++' };
+  function canUseLanguage(language) { return language === 'python' || language === 'javascript' || installedLanguages.has(language); }
+  function openAccountPanel() { $('account-panel').classList.add('open');$('account-panel').setAttribute('aria-hidden','false');$('account-panel-scrim').hidden=false;$('account-menu-button').setAttribute('aria-expanded','true');renderPackageControls(); }
+  function closeAccountPanel() { $('account-panel').classList.remove('open');$('account-panel').setAttribute('aria-hidden','true');$('account-panel-scrim').hidden=true;$('account-menu-button').setAttribute('aria-expanded','false'); }
+  function updateLanguageAccess() {
+    [...languageSelect.options].forEach(option=>{option.disabled=!canUseLanguage(option.value);option.textContent=LABELS[option.value]+(option.disabled?' · Sign in to unlock':'');});
+    if(activeProgram&&!canUseLanguage(activeProgram.language)){const fallback=state.programs.find(p=>canUseLanguage(p.language));if(fallback)setActive(fallback.id);}
+    renderInstalledLanguages();renderPackageControls();
+  }
+  async function refreshAccountData() {
+    if(!supabaseClient||!accountUser)return;
+    const [langs,packs]=await Promise.all([supabaseClient.from('draco_user_languages').select('language').order('installed_at'),supabaseClient.from('draco_user_packages').select('language,package_name,package_version,installed_at').order('installed_at')]);
+    if(langs.error)throw langs.error;if(packs.error)throw packs.error;
+    installedLanguages=new Set((langs.data||[]).map(x=>x.language));installedPackages=packs.data||[];updateLanguageAccess();
+  }
+  function renderInstalledLanguages() {
+    const host=$('installed-language-list');if(!host)return;host.replaceChildren();
+    ['python','javascript',...installedLanguages].forEach(language=>{const row=document.createElement('div');row.className='installed-row';const name=document.createElement('span');name.textContent=LABELS[language];const state=document.createElement('small');state.textContent=(language==='python'||language==='javascript')?'Included by default':'Added to your account';row.append(name,state);host.append(row);});
+    document.querySelectorAll('[data-add-language]').forEach(button=>{const language=button.dataset.addLanguage,added=installedLanguages.has(language);button.disabled=added;button.querySelector('b').textContent=added?'✓':'＋';button.querySelector('small').textContent=added?'Added to account':LABELS[language]+' compiler';});
+  }
+  function renderPackageControls() {
+    const select=$('package-language');if(!select)return;const available=['python','javascript',...installedLanguages],previous=available.includes(select.value)?select.value:'python';select.replaceChildren();
+    available.forEach(language=>{const option=document.createElement('option');option.value=language;option.textContent=LABELS[language];select.append(option);});select.value=previous;
+    const suggestions=$('package-suggestions');suggestions.replaceChildren();
+    (PACKAGE_CATALOG[select.value]||[]).forEach(name=>{const button=document.createElement('button');button.type='button';button.className='package-chip';button.textContent=name;button.addEventListener('click',()=>{$('package-name').value=name;$('package-name').focus();});suggestions.append(button);});
+    renderInstalledPackages();
+  }
+  function renderInstalledPackages() {
+    const host=$('installed-package-list');if(!host)return;host.replaceChildren();const language=$('package-language').value,list=installedPackages.filter(p=>p.language===language);
+    if(!list.length){const empty=document.createElement('p');empty.className='installed-empty';empty.textContent='No packages added for this language yet.';host.append(empty);return;}
+    list.forEach(p=>{const row=document.createElement('div');row.className='installed-row';const name=document.createElement('span');name.textContent=p.package_name+(p.package_version?'@'+p.package_version:'');const remove=document.createElement('button');remove.type='button';remove.textContent='Remove';remove.addEventListener('click',()=>removePackage(p));row.append(name,remove);host.append(row);});
+  }
+  async function addLanguage(language) {
+    if(!accountUser){openAccountPanel();$('account-email').focus();showToast('Create an account to add languages.');return;}
+    if(!['java','c','cpp'].includes(language)||accountBusy||installedLanguages.has(language))return;accountBusy=true;
+    try{const {error}=await supabaseClient.from('draco_user_languages').insert({user_id:accountUser.id,language});if(error)throw error;await refreshAccountData();showToast(LABELS[language]+' added to your account.');}
+    catch(e){showToast(e.message||'Could not add this language.');}finally{accountBusy=false;}
+  }
+  async function addPackage() {
+    if(!accountUser){openAccountPanel();showToast('Sign in to save packages to your account.');return;}
+    const language=$('package-language').value,name=$('package-name').value.trim(),version=$('package-version').value.trim();
+    if(!name){showToast('Enter a package name.');return;}if(!canUseLanguage(language)){showToast('Add this language to your account first.');return;}
+    if(version&&!/^[A-Za-z0-9.+_-]{1,80}$/.test(version)){showToast('Version contains unsupported characters.');return;}
+    if(installedPackages.some(p=>p.language===language&&p.package_name.toLowerCase()===name.toLowerCase())){showToast('That package is already on your account.');return;}
+    accountBusy=true;$('account-add-package').disabled=true;
+    try{const {error}=await supabaseClient.from('draco_user_packages').insert({user_id:accountUser.id,language,package_name:name,package_version:version});if(error)throw error;$('package-name').value='';$('package-version').value='';await refreshAccountData();showToast(name+' added. It will be installed in your next run.');}
+    catch(e){showToast(e.message||'Could not add this package.');}finally{accountBusy=false;$('account-add-package').disabled=false;}
+  }
+  async function removePackage(p) {
+    try{const {error}=await supabaseClient.from('draco_user_packages').delete().eq('language',p.language).eq('package_name',p.package_name);if(error)throw error;await refreshAccountData();showToast(p.package_name+' removed.');}
+    catch(e){showToast(e.message||'Could not remove package.');}
+  }
+  async function handleSignIn() {
+    if(!supabaseClient){$('account-auth-message').textContent='Account service is unavailable.';return;}
+    const email=$('account-email').value.trim(),password=$('account-password').value;if(!email||!password){$('account-auth-message').textContent='Enter your email and password.';return;}
+    $('account-auth-message').textContent='Signing in…';const {data,error}=await supabaseClient.auth.signInWithPassword({email,password});if(error){$('account-auth-message').textContent=error.message;return;}
+    accountSession=data.session;accountUser=data.user;await applyAccountSession();
+  }
+  async function handleSignUp() {
+    if(!supabaseClient){$('account-auth-message').textContent='Account service is unavailable.';return;}
+    const email=$('account-email').value.trim(),password=$('account-password').value;if(!email||password.length<8){$('account-auth-message').textContent='Enter an email and a password with at least 8 characters.';return;}
+    $('account-auth-message').textContent='Creating account…';const {data,error}=await supabaseClient.auth.signUp({email,password,options:{emailRedirectTo:location.origin+location.pathname}});
+    if(error){$('account-auth-message').textContent=error.message;return;}if(!data.session){$('account-auth-message').textContent='Check your email to confirm your account, then sign in.';return;}
+    accountSession=data.session;accountUser=data.user;await applyAccountSession();
+  }
+  async function applyAccountSession() {
+    $('account-guest').hidden=!!accountUser;$('account-user').hidden=!accountUser;
+    if(accountUser){$('account-user-email').textContent=accountUser.email||'Signed in';$('account-avatar').textContent=(accountUser.email||'D').slice(0,1).toUpperCase();$('account-auth-message').textContent='';try{await refreshAccountData();}catch(e){showToast('Could not load account settings: '+e.message);}}
+    else{installedLanguages.clear();installedPackages=[];updateLanguageAccess();}
+    updateLanguageAccess();
+  }
+  async function initAccount() {
+    $('account-menu-button').addEventListener('click',openAccountPanel);$('account-panel-close').addEventListener('click',closeAccountPanel);$('account-panel-scrim').addEventListener('click',closeAccountPanel);
+    $('account-signin').addEventListener('click',handleSignIn);$('account-signup').addEventListener('click',handleSignUp);
+    $('account-signout').addEventListener('click',async()=>{await supabaseClient.auth.signOut();accountSession=null;accountUser=null;await applyAccountSession();showToast('Signed out. Guest languages remain available.');});
+    $('account-add-package').addEventListener('click',addPackage);$('package-language').addEventListener('change',renderPackageControls);
+    document.querySelectorAll('[data-add-language]').forEach(button=>button.addEventListener('click',()=>addLanguage(button.dataset.addLanguage)));
+    $('account-password').addEventListener('keydown',e=>{if(e.key==='Enter')handleSignIn();});
+    if(!supabaseClient){$('account-auth-message').textContent='Account sign-in could not initialize. Reload the page or check the network.';return;}
+    const {data}=await supabaseClient.auth.getSession();accountSession=data.session;accountUser=data.session?.user||null;await applyAccountSession();
+    supabaseClient.auth.onAuthStateChange((_event,session)=>{accountSession=session;accountUser=session?.user||null;setTimeout(()=>applyAccountSession(),0);});
   }
 
   function registerServiceWorker() {

@@ -326,5 +326,15 @@ await t('oversized request body is refused with 413', async () => {
   assert.equal(r.status, 413);
 });
 
+
+await t('guest execution is blocked for account-only languages before sandbox allocation', async () => {
+  const keys=['VERCEL','SUPABASE_URL','SUPABASE_ANON_KEY','CODE_BACKEND_SHARED_SECRET','CODE_RATE_LIMIT_SECRET'];
+  const prior=Object.fromEntries(keys.map(k=>[k,process.env[k]]));
+  process.env.VERCEL='1';process.env.SUPABASE_URL='https://gbeurqibcfvquacasofq.supabase.co';process.env.SUPABASE_ANON_KEY='anon-test-key';process.env.CODE_BACKEND_SHARED_SECRET='backend-test-secret-that-is-over-32-chars';process.env.CODE_RATE_LIMIT_SECRET='rate-test-secret-that-is-over-32-characters';
+  const before=fake.created;
+  try {const r=await call('POST','/execute',{language:'java',code:'public class Main {}'});assert.equal(r.status,401);assert.equal(fake.created,before);}
+  finally {for(const k of keys){if(prior[k]===undefined)delete process.env[k];else process.env[k]=prior[k];}}
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
