@@ -3,6 +3,7 @@
 
   const BACKEND_URL = String(window.DRACOCODE_CONFIG?.BACKEND_URL || window.DRACOSKILL_CONFIG?.BACKEND_URL || 'https://draco-code-backend.vercel.app').replace(/\/$/, '');
   const STORAGE_KEY = 'draco-code-workspace-v1';
+  const LAYOUT_STORAGE_KEY = 'draco-code-layout-v1';
   const MAX_PROGRAMS = 30;
   const SUPABASE_URL = String(window.DRACOCODE_CONFIG?.SUPABASE_URL || '').trim();
   const SUPABASE_KEY = String(window.DRACOCODE_CONFIG?.SUPABASE_ANON_KEY || '').trim();
@@ -751,7 +752,42 @@
     }, { once: true });
   }
 
+  function loadSavedLayout() {
+    try {
+      return localStorage.getItem(LAYOUT_STORAGE_KEY) === 'stacked' ? 'stacked' : 'split';
+    } catch {
+      return 'split';
+    }
+  }
+
+  function setLayout(layout) {
+    const selected = layout === 'stacked' ? 'stacked' : 'split';
+    const mainColumn = document.querySelector('.main-column');
+    if (!mainColumn) return;
+    mainColumn.dataset.layout = selected;
+
+    const button = $('layout-toggle-button');
+    const label = $('layout-toggle-label');
+    const split = selected === 'split';
+    label.textContent = split ? 'Split view' : 'Stacked view';
+    button.title = split ? 'Switch to stacked layout' : 'Switch to split layout';
+    button.setAttribute('aria-label', button.title);
+    button.setAttribute('aria-pressed', String(split));
+
+    try {
+      localStorage.setItem(LAYOUT_STORAGE_KEY, selected);
+    } catch {
+      // Layout still changes for this session when storage is unavailable.
+    }
+  }
+
+  function toggleLayout() {
+    const current = document.querySelector('.main-column')?.dataset.layout || 'split';
+    setLayout(current === 'split' ? 'stacked' : 'split');
+  }
+
   // Wire editor and controls.
+  setLayout(loadSavedLayout());
   editorApi = window.DracoEditor.attach(editor, {
     lang: 'python',
     onCursor: (line, column) => { $('cursor-position').textContent = `Line ${line}, column ${column}`; }
@@ -771,6 +807,7 @@
   });
   languageSelect.addEventListener('change', (event) => setLanguage(event.target.value));
   runButton.addEventListener('click', runCode);
+  $('layout-toggle-button').addEventListener('click', toggleLayout);
   $('new-program-button').addEventListener('click', () => createProgram());
   $('share-button').addEventListener('click', shareProgram);
   $('download-button').addEventListener('click', downloadProgram);
