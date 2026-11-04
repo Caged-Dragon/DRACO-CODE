@@ -24,7 +24,7 @@ const JAVA_FLAGS = '-Xmx256m -Xss1m -XX:+UseSerialGC -XX:TieredStopAtLevel=1';
 
 // Tests replace this to run against a local stand-in instead of real microVMs.
 export async function defaultFactory() {
-  const params = { timeout: 90_000, persistent: false, networkPolicy: 'deny-all', resources: { vcpus: 1 } };
+  const params = { timeout: 90_000, persistent: false, networkPolicy: 'deny-all', resources: { vcpus: 1 }, region: process.env.DRACO_SANDBOX_REGION || 'iad1' };
   const snapshotId = await findSnapshotId(); // env override, else the snapshot made by /setup
   if (snapshotId) params.source = { type: 'snapshot', snapshotId };
   return Sandbox.create(params);
@@ -77,7 +77,7 @@ export class RunSession {
     } else if (language==='c'||language==='cpp') {
       const allowed=language==='c'?new Set(['libsqlite3-dev','libssl-dev','libcurl4-openssl-dev']):new Set(['nlohmann-json3-dev','libboost-dev','libeigen3-dev','libfmt-dev']);
       if(specs.some(p=>!allowed.has(p.name)))throw new Error('This C/C++ package is not in the supported system-library catalogue.');
-      await sb.update({networkPolicy:{allow:['archive.ubuntu.com','security.ubuntu.com','ports.ubuntu.com','packages.ubuntu.com']}});
+      await sb.update({networkPolicy:{allow:['*.ubuntu.com','archive.ubuntu.com','security.ubuntu.com','ports.ubuntu.com','packages.ubuntu.com']}});
       await sb.runCommand({cmd:'sed',args:['-i','s|http://|https://|g','/etc/apt/sources.list.d/ubuntu.sources'],sudo:true});
       const update=await sb.runCommand({cmd:'apt-get',args:['update','-qq'],sudo:true});if(update.exitCode!==0)throw new Error('Could not refresh the C/C++ package catalogue.');
       const install=await sb.runCommand({cmd:'apt-get',args:['install','-y','--no-install-recommends',...specs.map(p=>p.name)],sudo:true});if(install.exitCode!==0)throw new Error('C/C++ package installation failed.');
@@ -131,8 +131,8 @@ export class RunSession {
       if (!/^[A-Za-z_]\w*$/.test(this.cls)) return { error: 'Invalid Java class name.' };
       return this.phase('compile', `mkdir -p build && javac -nowarn -encoding UTF-8 -J-Xmx256m -J-XX:+UseSerialGC -cp '.draco-java/*' -d build ${this.file}`, { timeoutSec: COMPILE_TIMEOUT });
     }
-    if (l === 'c') return this.phase('compile', `gcc -std=gnu17 -O1 -Wall -pipe -o app ${this.file} -lm -lpthread`, { timeoutSec: COMPILE_TIMEOUT });
-    if (l === 'cpp') return this.phase('compile', `g++ -std=gnu++17 -O1 -Wall -pipe -o app ${this.file} -lm -lpthread`, { timeoutSec: COMPILE_TIMEOUT });
+    if (l === 'c') { const flags=[]; const names=this.packages.map(p=>p.name); if(names.includes('libsqlite3-dev'))flags.push('-lsqlite3'); if(names.includes('libssl-dev'))flags.push('-lssl','-lcrypto'); if(names.includes('libcurl4-openssl-dev'))flags.push('-lcurl'); return this.phase('compile', `gcc -std=gnu17 -O1 -Wall -pipe -o app ${this.file} -lm -lpthread ${flags.join(' ')}`, { timeoutSec: COMPILE_TIMEOUT }); }
+    if (l === 'cpp') { const flags=[]; const names=this.packages.map(p=>p.name); if(names.includes('libfmt-dev'))flags.push('-lfmt'); if(names.includes('libeigen3-dev'))flags.push('-I/usr/include/eigen3'); return this.phase('compile', `g++ -std=gnu++17 -O1 -Wall -pipe -o app ${this.file} -lm -lpthread ${flags.join(' ')}`, { timeoutSec: COMPILE_TIMEOUT }); }
     return null;
   }
 
