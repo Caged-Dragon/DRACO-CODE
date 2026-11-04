@@ -83,6 +83,10 @@
               <span class="save-state" id="save-state" role="status">Saved locally</span>
             </div>
             <div class="editor-actions">
+              <button class="quiet-button layout-toggle-button" id="layout-toggle-button" type="button" aria-label="Switch to stacked layout" aria-pressed="true" title="Switch to stacked layout">
+                <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2" y="2" width="10" height="16" rx="1.5"></rect><rect x="14" y="2" width="4" height="7" rx="1"></rect><rect x="14" y="11" width="4" height="7" rx="1"></rect></svg>
+                <span id="layout-toggle-label">Split view</span>
+              </button>
               <button class="quiet-button" id="reset-button" type="button" title="Restore the starter template">Reset</button>
               <button class="quiet-button danger-quiet" id="clear-button" type="button" title="Clear editor">Clear</button>
             </div>
@@ -108,10 +112,10 @@
             <div class="console-title"><span class="console-icon">›_</span><span>Console</span><span class="console-subtitle" id="console-subtitle">Ready when you are</span></div>
             <div class="console-actions">
               <button class="quiet-button" id="clear-output-button" type="button">Clear output</button>
-              <button class="quiet-button" id="toggle-input-button" type="button" aria-expanded="false" aria-controls="stdin-wrap">Standard input <span class="chevron">⌄</span></button>
+              <button class="quiet-button" id="toggle-input-button" type="button" aria-expanded="true" aria-controls="stdin-wrap">Standard input <span class="chevron">⌄</span></button>
             </div>
           </div>
-          <div class="stdin-wrap" id="stdin-wrap" hidden>
+          <div class="stdin-wrap" id="stdin-wrap">
             <label for="stdin-input">STDIN <span>Text your program reads from standard input</span></label>
             <textarea id="stdin-input" rows="2" placeholder="Enter input here…" spellcheck="false"></textarea>
           </div>
