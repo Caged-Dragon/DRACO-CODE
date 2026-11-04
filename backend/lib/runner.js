@@ -55,7 +55,8 @@ export class RunSession {
 
   async open() {
     this.sb = await this.factory();
-    await this.sb.writeFiles([{ path: `${ROOT}/${this.file}`, content: Buffer.from(this.code, 'utf8') }]);\n    await this.installPackages();
+    await this.sb.writeFiles([{ path: `${ROOT}/${this.file}`, content: Buffer.from(this.code, 'utf8') }]);
+    await this.installPackages();
   }
 
   async installPackages() {
