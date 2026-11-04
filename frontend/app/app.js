@@ -546,35 +546,202 @@
     try{const {error}=await supabaseClient.from('draco_user_packages').delete().eq('language',p.language).eq('package_name',p.package_name);if(error)throw error;await refreshAccountData();showToast(p.package_name+' removed.');}
     catch(e){showToast(e.message||'Could not remove package.');}
   }
+  function setAuthMessage(message, kind) {
+    const el = $('account-auth-message');
+    el.textContent = message || '';
+    el.className = 'account-message' + (kind ? ' ' + kind : '');
+  }
+
+  function setAuthBusy(busy) {
+    $('account-signin').disabled = busy;
+    $('account-signup').disabled = busy;
+    $('account-signin').textContent = busy ? 'Please wait…' : 'Sign in';
+    $('account-signup').textContent = busy ? 'Please wait…' : 'Create account';
+  }
+
+  function authErrorText(error, fallback) {
+    const message = String(error?.message || '');
+    if (/invalid login credentials/i.test(message)) return 'Email or password is incorrect. Check your details and try again.';
+    if (/email not confirmed/i.test(message)) return 'Please confirm your email using the link we sent before signing in.';
+    if (/rate limit|too many requests/i.test(message)) return 'Too many attempts. Please wait a little and try again.';
+    if (/password.*(short|minimum|at least)/i.test(message)) return 'Choose a longer password and try again.';
+    return message || fallback;
+  }
+
+  function authRedirectUrl() {
+    // Keep the browser auth callback on the production app origin. This URL must be
+    // present in Supabase Authentication > URL Configuration > Redirect URLs.
+    return 'https://draco-code.vercel.app/';
+  }
+
   async function handleSignIn() {
-    if(!supabaseClient){$('account-auth-message').textContent='Account service is unavailable.';return;}
-    const email=$('account-email').value.trim(),password=$('account-password').value;if(!email||!password){$('account-auth-message').textContent='Enter your email and password.';return;}
-    $('account-auth-message').textContent='Signing in…';const {data,error}=await supabaseClient.auth.signInWithPassword({email,password});if(error){$('account-auth-message').textContent=error.message;return;}
-    accountSession=data.session;accountUser=data.user;await applyAccountSession();
+    if (!supabaseClient || accountBusy) {
+      if (!supabaseClient) setAuthMessage('Account service is unavailable. Please reload the page and try again.', 'error');
+      return;
+    }
+    const email = $('account-email').value.trim().toLowerCase();
+    const password = $('account-password').value;
+    if (!email || !password) {
+      setAuthMessage('Enter your email address and password.', 'error');
+      return;
+    }
+
+    accountBusy = true;
+    setAuthBusy(true);
+    setAuthMessage('Signing in securely…');
+    $('account-password').autocomplete = 'current-password';
+    try {
+      const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      if (!data?.session || !data?.user) throw new Error('Supabase did not return an active session. Please try again.');
+      accountSession = data.session;
+      accountUser = data.user;
+      await applyAccountSession();
+      showToast('Signed in successfully.');
+    } catch (error) {
+      setAuthMessage(authErrorText(error, 'Could not sign in. Please try again.'), 'error');
+    } finally {
+      accountBusy = false;
+      setAuthBusy(false);
+    }
   }
+
   async function handleSignUp() {
-    if(!supabaseClient){$('account-auth-message').textContent='Account service is unavailable.';return;}
-    const email=$('account-email').value.trim(),password=$('account-password').value;if(!email||password.length<8){$('account-auth-message').textContent='Enter an email and a password with at least 8 characters.';return;}
-    $('account-auth-message').textContent='Creating account…';const {data,error}=await supabaseClient.auth.signUp({email,password,options:{emailRedirectTo:location.origin+location.pathname}});
-    if(error){$('account-auth-message').textContent=error.message;return;}if(!data.session){$('account-auth-message').textContent='Check your email to confirm your account, then sign in.';return;}
-    accountSession=data.session;accountUser=data.user;await applyAccountSession();
+    if (!supabaseClient || accountBusy) {
+      if (!supabaseClient) setAuthMessage('Account service is unavailable. Please reload the page and try again.', 'error');
+      return;
+    }
+    const email = $('account-email').value.trim().toLowerCase();
+    const password = $('account-password').value;
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setAuthMessage('Enter a valid email address to create your account.', 'error');
+      return;
+    }
+    if (password.length < 8) {
+      setAuthMessage('Choose a password with at least 8 characters.', 'error');
+      return;
+    }
+
+    accountBusy = true;
+    setAuthBusy(true);
+    $('account-password').autocomplete = 'new-password';
+    setAuthMessage('Creating your account in Supabase…');
+    try {
+      const { data, error } = await supabaseClient.auth.signUp({
+        email,
+        password,
+        options: { emailRedirectTo: authRedirectUrl() }
+      });
+      if (error) throw error;
+
+      // Supabase intentionally obscures whether an email is already registered in
+      // some project configurations. Never claim an account was created in that case.
+      if (!data?.session) {
+        const alreadyRegistered = Array.isArray(data?.user?.identities) && data.user.identities.length === 0;
+        setAuthMessage(
+          alreadyRegistered
+            ? 'If this email can be registered, Supabase will send a confirmation message. Check your inbox.'
+            : 'Your registration request was accepted. Check your email and confirm the address. After confirmation, return here and sign in.',
+          'success'
+        );
+        return;
+      }
+
+      accountSession = data.session;
+      accountUser = data.user || data.session.user;
+      await applyAccountSession();
+      showToast('Your account is ready. You are signed in.');
+    } catch (error) {
+      setAuthMessage(authErrorText(error, 'Could not create your account. Please try again.'), 'error');
+    } finally {
+      accountBusy = false;
+      setAuthBusy(false);
+    }
   }
+
   async function applyAccountSession() {
-    $('account-guest').hidden=!!accountUser;$('account-user').hidden=!accountUser;
-    if(accountUser){$('account-user-email').textContent=accountUser.email||'Signed in';$('account-avatar').textContent=(accountUser.email||'D').slice(0,1).toUpperCase();$('account-auth-message').textContent='';try{await refreshAccountData();}catch(e){showToast('Could not load account settings: '+e.message);}}
-    else{installedLanguages.clear();installedPackages=[];updateLanguageAccess();}
+    const signedIn = !!accountSession?.user && !!accountUser;
+    $('account-guest').hidden = signedIn;
+    $('account-user').hidden = !signedIn;
+    if (signedIn) {
+      $('account-user-email').textContent = accountUser.email || 'Signed in';
+      $('account-avatar').textContent = (accountUser.email || 'D').slice(0, 1).toUpperCase();
+      setAuthMessage('');
+      try {
+        await refreshAccountData();
+      } catch (error) {
+        showToast('Signed in, but account settings could not load. Please reopen the panel and retry.');
+        console.error('Draco account data could not be refreshed', error);
+      }
+    } else {
+      accountSession = null;
+      accountUser = null;
+      installedLanguages.clear();
+      installedPackages = [];
+    }
     updateLanguageAccess();
   }
+
   async function initAccount() {
-    $('account-menu-button').addEventListener('click',openAccountPanel);$('account-panel-close').addEventListener('click',closeAccountPanel);$('account-panel-scrim').addEventListener('click',closeAccountPanel);
-    $('account-signin').addEventListener('click',handleSignIn);$('account-signup').addEventListener('click',handleSignUp);
-    $('account-signout').addEventListener('click',async()=>{await supabaseClient.auth.signOut();accountSession=null;accountUser=null;await applyAccountSession();showToast('Signed out. Guest languages remain available.');});
-    $('account-add-package').addEventListener('click',addPackage);$('package-language').addEventListener('change',renderPackageControls);
-    document.querySelectorAll('[data-add-language]').forEach(button=>button.addEventListener('click',()=>addLanguage(button.dataset.addLanguage)));
-    $('account-password').addEventListener('keydown',e=>{if(e.key==='Enter')handleSignIn();});
-    if(!supabaseClient){$('account-auth-message').textContent='Account sign-in could not initialize. Reload the page or check the network.';return;}
-    const {data}=await supabaseClient.auth.getSession();accountSession=data.session;accountUser=data.session?.user||null;await applyAccountSession();
-    supabaseClient.auth.onAuthStateChange((_event,session)=>{accountSession=session;accountUser=session?.user||null;setTimeout(()=>applyAccountSession(),0);});
+    $('account-menu-button').addEventListener('click', openAccountPanel);
+    $('account-panel-close').addEventListener('click', closeAccountPanel);
+    $('account-panel-scrim').addEventListener('click', closeAccountPanel);
+    $('account-signin').addEventListener('click', handleSignIn);
+    $('account-signup').addEventListener('click', handleSignUp);
+    $('account-signout').addEventListener('click', async () => {
+      if (!supabaseClient || accountBusy) return;
+      accountBusy = true;
+      $('account-signout').disabled = true;
+      try {
+        const { error } = await supabaseClient.auth.signOut();
+        if (error) throw error;
+        accountSession = null;
+        accountUser = null;
+        await applyAccountSession();
+        showToast('Signed out. Guest languages remain available.');
+      } catch (error) {
+        showToast(authErrorText(error, 'Could not sign out. Please try again.'));
+      } finally {
+        accountBusy = false;
+        $('account-signout').disabled = false;
+      }
+    });
+    $('account-add-package').addEventListener('click', addPackage);
+    $('package-language').addEventListener('change', renderPackageControls);
+    document.querySelectorAll('[data-add-language]').forEach(button => {
+      button.addEventListener('click', () => addLanguage(button.dataset.addLanguage));
+    });
+    $('account-password').addEventListener('keydown', event => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        handleSignIn();
+      }
+    });
+
+    if (!supabaseClient) {
+      setAuthMessage('Account sign-in could not initialize. Check the Supabase public URL/key settings and reload.', 'error');
+      $('account-signin').disabled = true;
+      $('account-signup').disabled = true;
+      return;
+    }
+
+    // Subscribe before reading storage so a confirmation-link redirect or token
+    // refresh cannot be missed during startup. The SDK persists/refreshes sessions.
+    supabaseClient.auth.onAuthStateChange((event, session) => {
+      accountSession = session || null;
+      accountUser = session?.user || null;
+      setTimeout(() => {
+        applyAccountSession().catch(error => {
+          console.error('Draco authentication state could not be applied', error);
+        });
+      }, 0);
+    });
+
+    const { data, error } = await supabaseClient.auth.getSession();
+    if (error) throw error;
+    accountSession = data?.session || null;
+    accountUser = accountSession?.user || null;
+    await applyAccountSession();
   }
 
   function registerServiceWorker() {

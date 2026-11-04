@@ -41,3 +41,28 @@ Set these variables in the **backend Vercel project only**:
 `ALLOWED_ORIGINS` belongs on the backend too. The browser must never receive either backend secret or a Supabase service-role key. See `backend/.env.example` for safe placeholders.
 
 No user source code, stdin, or full compiler output is persisted to Supabase by the Draco Code API. Only language, status, runtime duration, byte counts, timeout/compile flags, and a keyed pseudonymous fingerprint are recorded.
+
+
+## Supabase Auth: registration and sign-in
+
+The frontend uses the Supabase Auth browser client. New registrations are created by
+`supabase.auth.signUp()` and are stored by Supabase in `auth.users`; passwords are
+handled by Supabase Auth and must never be copied into an application table. Returning
+users sign in with `signInWithPassword()`. The browser client persists and refreshes the
+session, and `onAuthStateChange()` restores the account UI after a confirmation-link
+redirect or token refresh.
+
+Before accepting production signups, configure the Supabase project at
+**Authentication → URL Configuration**:
+
+- Set **Site URL** to `https://draco-code.vercel.app/`.
+- Add `https://draco-code.vercel.app/` to **Redirect URLs**.
+
+The app sends email-confirmation links back to that production URL. If a custom production
+domain is adopted later, add its exact HTTPS URL to the allow-list and update
+`authRedirectUrl()` in `frontend/app/app.js` to the canonical domain. Do not add a broad
+`*.vercel.app` wildcard to production auth redirects unless preview signups are deliberately
+needed.
+
+Email/password sign-in is enabled in Supabase Auth by default for hosted projects; keep
+email confirmation enabled unless the product owner deliberately chooses auto-confirm.
