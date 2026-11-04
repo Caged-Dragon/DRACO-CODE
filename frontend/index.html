@@ -1,127 +1,173 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en" data-theme="dark">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="dark light">
-<meta name="description" content="DracoSkill is a free cloud editor for Python, JavaScript, Java, C and C++. Your code compiles and runs on our servers, so a browser is all you need.">
-<link rel="icon" type="image/png" href="../assets/dracoskill-mark.png">
-<title>DracoSkill: write it, run it, nothing to install</title>
-<script src="../assets/theme.js"></script>
-<link rel="stylesheet" href="../assets/design.css">
-<link rel="stylesheet" href="styles.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#17161A">
+  <meta name="description" content="Draco Code is a fast online compiler for Python, JavaScript, Java, C and C++. Write, run and share code from your browser.">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <link rel="icon" type="image/png" href="./assets/icons/favicon-32.png">
+  <link rel="preload" href="./assets/fonts/jetbrains-mono.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="./assets/design.css">
+  <link rel="stylesheet" href="./app/styles.css">
+  <script src="./assets/theme.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4"></script>
+  <title>Draco Code — Online Compiler</title>
 </head>
 <body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="Draco Code home">
+        <img src="./assets/dracoskill-mark.png" alt="" width="32" height="32">
+        <span class="brand-name">Draco<span>Code</span></span>
+        <span class="brand-divider" aria-hidden="true"></span>
+        <span class="brand-caption">CAGED DRAGON</span>
+      </a>
 
-<nav class="nav">
-  <div class="wrap nav-in">
-    <a class="brand" href="./"><img src="../assets/dracoskill-mark.png" alt="" width="30" height="30"><span>DracoSkill</span></a>
-    <div class="nav-links">
-      <a href="#how">How it works</a>
-      <a href="#roadmap">Roadmap</a>
-    </div>
-    <div class="nav-right">
-      <button class="icon-btn" data-theme-toggle aria-label="Switch theme">
-        <svg class="i-sun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.3M12 19.2v2.3M4.4 4.4l1.6 1.6M18 18l1.6 1.6M2.5 12h2.3M19.2 12h2.3M4.4 19.6L6 18M18 6l1.6-1.6"/></svg>
-        <svg class="i-moon" viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M20 14.6A8.5 8.5 0 019.4 4a8.5 8.5 0 1010.6 10.6z"/></svg>
-      </button>
-      <a class="btn btn-sm" href="../app/">Open the editor</a>
-    </div>
-  </div>
-</nav>
-
-<header class="hero wrap">
-  <div class="hero-copy">
-    <h1><span class="l">Write it.</span><span class="l">Run it.</span><span class="l">Nothing to install.</span></h1>
-    <p class="lead">DracoSkill is a free cloud editor for Python, JavaScript, Java, C and C++. Your code compiles and runs on our servers, so a browser is all you need.</p>
-    <div class="cta-row">
-      <a class="btn btn-ember" href="../app/">Open the editor</a>
-      <a class="btn" href="../app/#problems" id="cta-problems">Solve a problem</a>
-    </div>
-    <p class="status-line"><span class="chip" id="rt-chip">Checking the backend</span></p>
-  </div>
-
-  <section class="live" id="live" aria-label="Try it now">
-    <div class="live-bar">
-      <div class="live-tabs" role="tablist" aria-label="Language">
-        <button role="tab" class="live-tab active" data-lang="python" aria-selected="true">Python</button>
-        <button role="tab" class="live-tab" data-lang="javascript" aria-selected="false">JavaScript</button>
-        <button role="tab" class="live-tab" data-lang="java" aria-selected="false">Java</button>
-        <button role="tab" class="live-tab" data-lang="c" aria-selected="false">C</button>
-        <button role="tab" class="live-tab" data-lang="cpp" aria-selected="false">C++</button>
+      <button class="icon-button account-menu-button" id="account-menu-button" type="button" aria-label="Open account and packages panel" aria-expanded="false" title="Account, languages and packages"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+      <div class="topbar-actions">
+        <span id="connection-chip" class="connection-chip checking" role="status" aria-live="polite">
+          <span class="connection-dot"></span><span id="connection-label">Connecting</span>
+        </span>
+        <label class="language-control" for="language-select">
+          <span class="sr-only">Programming language</span>
+          <select id="language-select" aria-label="Programming language">
+            <option value="python">Python</option>
+            <option value="javascript">JavaScript</option>
+            <option value="java">Java</option>
+            <option value="c">C</option>
+            <option value="cpp">C++</option>
+          </select>
+        </label>
+        <button class="icon-button" id="share-button" type="button" title="Copy share link" aria-label="Share code">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13.5a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.7 1.7M14 10.5a4 4 0 0 0-5.7 0l-3 3A4 4 0 0 0 11 19.2l1.7-1.7"/></svg>
+        </button>
+        <button class="icon-button" id="download-button" type="button" title="Download source file" aria-label="Download source file">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5v11m0 0 4-4m-4 4-4-4M4.5 17.5v2a1 1 0 0 0 1 1h13a1 1 0 0 0 1-1v-2"/></svg>
+        </button>
+        <button class="icon-button" data-theme-toggle type="button" title="Switch theme" aria-label="Switch theme">
+          <svg class="theme-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/></svg>
+          <svg class="theme-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 15.1A8.6 8.6 0 0 1 8.9 3.8 8.7 8.7 0 1 0 20.2 15.1Z"/></svg>
+        </button>
+        <button class="run-button" id="run-button" type="button" title="Run code (Ctrl+Enter)">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.2v11.6a.6.6 0 0 0 .9.5l9-5.8a.6.6 0 0 0 0-1l-9-5.8a.6.6 0 0 0-.9.5Z" fill="currentColor"/></svg>
+          <span id="run-label">Run</span><kbd>Ctrl ↵</kbd>
+        </button>
+        <button class="mobile-menu-button" id="mobile-menu-button" type="button" aria-label="Toggle files" aria-expanded="true">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        </button>
       </div>
-      <button class="btn btn-ember btn-sm" id="live-run" title="Run (Ctrl+Enter)"><svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M3 1.8v12.4a.6.6 0 00.9.5l10-6.2a.6.6 0 000-1L3.9 1.3a.6.6 0 00-.9.5z" fill="currentColor"/></svg><span id="live-run-label">Run</span></button>
-    </div>
-    <div class="live-code"><textarea id="live-code" aria-label="Example code you can edit and run"></textarea></div>
-    <div class="live-result" id="live-result">
-      <div class="seam" aria-hidden="true"></div>
-      <pre class="live-out" id="live-out" aria-live="polite">Press Run. This is a real program running on a real server. Edit it first if you like.</pre>
-    </div>
-  </section>
-</header>
+    </header>
 
-<section class="wrap how" id="how">
-  <h2>From a blank file to something you can show</h2>
-  <ol class="steps">
-    <li>
-      <h3>Write</h3>
-      <p>Pick Python, JavaScript, Java, C or C++ and start typing. Syntax colour, line numbers and auto-indent are built in.<span data-needs="accounts"> Log in to keep projects with several files.</span></p>
-    </li>
-    <li>
-      <h3>Run</h3>
-      <p>One press of Run compiles and runs your code on our servers. You get the real output, the real errors and how long it took.</p>
-    </li>
-    <li>
-      <h3>Solve</h3>
-      <p>Practise on problems judged against hidden test cases. When an answer is wrong, you see which test failed and what your program printed.</p>
-    </li>
-    <li data-needs="accounts">
-      <h3>Prove</h3>
-      <p>Solve every problem in the set and DracoSkill issues a certificate with a link anyone can use to check it.</p>
-    </li>
-  </ol>
-</section>
+    <main class="workspace" id="workspace">
+      <aside class="file-sidebar" id="file-sidebar" aria-label="Local programs">
+        <div class="sidebar-heading">
+          <div><span class="eyebrow">WORKSPACE</span><h1>My programs</h1></div>
+          <button class="new-program-button" id="new-program-button" type="button" title="Create a new program" aria-label="Create a new program">+</button>
+        </div>
+        <div class="sidebar-meta"><span class="sidebar-indicator"></span><span>Saved on this device</span></div>
+        <div class="program-list" id="program-list" role="list"></div>
+        <div class="sidebar-bottom">
+          <div class="local-note-icon" aria-hidden="true">⌘</div>
+          <p><strong>Private by default</strong><span>Your drafts stay in this browser until you share or download them.</span></p>
+        </div>
+      </aside>
 
-<section class="wrap proof" data-needs="accounts" aria-labelledby="cert-h">
-  <div class="proof-copy">
-    <h2 id="cert-h">A certificate that checks out</h2>
-    <p>Each certificate is generated from your own submission history: problems solved, accuracy, number of attempts. It carries an ID and a QR code that open a page confirming it is real.</p>
+      <section class="main-column" aria-label="Code workspace">
+        <section class="editor-panel" aria-label="Code editor">
+          <div class="editor-toolbar">
+            <div class="file-context">
+              <span class="file-type-dot" id="file-type-dot"></span>
+              <span class="filename" id="filename">main.py</span>
+              <span class="save-state" id="save-state" role="status">Saved locally</span>
+            </div>
+            <div class="editor-actions">
+              <button class="quiet-button layout-toggle-button" id="layout-toggle-button" type="button" aria-label="Switch to stacked layout" aria-pressed="true" title="Switch to stacked layout">
+                <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2" y="2" width="10" height="16" rx="1.5"></rect><rect x="14" y="2" width="4" height="7" rx="1"></rect><rect x="14" y="11" width="4" height="7" rx="1"></rect></svg>
+                <span id="layout-toggle-label">Split view</span>
+              </button>
+              <button class="quiet-button" id="reset-button" type="button" title="Restore the starter template">Reset</button>
+              <button class="quiet-button danger-quiet" id="clear-button" type="button" title="Clear editor">Clear</button>
+            </div>
+          </div>
+          <div class="editor-host" id="editor-host">
+            <textarea id="editor" class="editor" aria-label="Source code editor" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off"></textarea>
+          </div>
+          <div class="editor-statusbar">
+            <span id="status-language">Python</span>
+            <span class="status-separator"></span>
+            <span id="cursor-position">Line 1, column 1</span>
+            <span class="status-spacer"></span>
+            <span id="source-size">0 lines</span>
+            <span class="status-separator"></span>
+            <span>UTF-8</span>
+            <span class="status-separator"></span>
+            <span>Spaces: 4</span>
+          </div>
+        </section>
+
+        <section class="console-panel" aria-label="Program output">
+          <div class="console-toolbar">
+            <div class="console-title"><span class="console-icon">›_</span><span>Console</span><span class="console-subtitle" id="console-subtitle">Ready when you are</span></div>
+            <div class="console-actions">
+              <button class="quiet-button" id="clear-output-button" type="button">Clear output</button>
+              <button class="quiet-button" id="toggle-input-button" type="button" aria-expanded="true" aria-controls="stdin-wrap">Standard input <span class="chevron">⌄</span></button>
+            </div>
+          </div>
+          <div class="stdin-wrap" id="stdin-wrap">
+            <label for="stdin-input">STDIN <span>Text your program reads from standard input</span></label>
+            <textarea id="stdin-input" rows="2" placeholder="Enter input here…" spellcheck="false"></textarea>
+          </div>
+          <div class="console-output" id="console-output" aria-live="polite" aria-relevant="additions text">
+            <div class="empty-output"><span class="empty-output-mark">›</span><div><strong>Output will appear here</strong><p>Run your program to see standard output, errors and execution time.</p></div></div>
+          </div>
+          <div class="console-footer"><span class="result-state" id="result-state"><span class="result-dot"></span><span>Idle</span></span><span id="execution-time"></span></div>
+        </section>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <div class="runtime-list" id="runtime-list" aria-label="Runtime availability">
+        <span class="runtime-caption">RUNTIMES</span><span class="runtime-pill pending">Python</span><span class="runtime-pill pending">JavaScript</span><span class="runtime-pill pending">Java</span><span class="runtime-pill pending">C</span><span class="runtime-pill pending">C++</span>
+      </div>
+      <div class="footer-right"><span id="backend-detail">Backend: checking</span><span class="footer-divider"></span><span>Draco Code <span class="footer-version">by CAGED DRAGON</span></span></div>
+    </footer>
   </div>
-  <figure class="cert-sample" aria-label="Sample certificate">
-    <div class="cert-sample-in">
-      <div class="cs-top"><img src="../assets/dracoskill-mark.png" alt="" width="40" height="40"><span>DracoSkill certificate of problem solving</span></div>
-      <p class="cs-small">This certifies that</p>
-      <p class="cs-name">Your name here</p>
-      <p class="cs-small">has solved every problem in the problem-solving set.</p>
-      <dl class="cs-stats"><div><dt>Problems solved</dt><dd>3 of 3</dd></div><div><dt>Accuracy</dt><dd>Your own</dd></div><div><dt>Attempts</dt><dd>Your own</dd></div></dl>
+
+  <aside class="account-panel" id="account-panel" aria-label="Account, languages and packages" aria-hidden="true">
+    <div class="account-panel-head"><div><span class="eyebrow">DRACO ACCOUNT</span><h2>Languages & packages</h2></div><button class="icon-button" id="account-panel-close" type="button" aria-label="Close panel">×</button></div>
+    <div id="account-guest" class="account-auth">
+      <p class="account-copy">Sign in or create an account to unlock Java, C and C++. New users are saved in Supabase Auth. If email confirmation is enabled, confirm your address before signing in.</p>
+      <label for="account-email">Email</label><input id="account-email" type="email" autocomplete="email" placeholder="you@example.com">
+      <label for="account-password">Password</label><input id="account-password" type="password" autocomplete="current-password" placeholder="At least 8 characters">
+      <div class="account-auth-actions"><button class="panel-primary" id="account-signin" type="button">Sign in</button><button class="panel-secondary" id="account-signup" type="button">Create account</button></div>
+      <p id="account-auth-message" class="account-message" role="status"></p>
+      <div class="guest-access-note"><strong>Guest access</strong><span>Python and JavaScript are ready without an account.</span></div>
     </div>
-    <figcaption>Sample layout. Real certificates carry your real numbers.</figcaption>
-  </figure>
-</section>
-
-<section class="wrap roadmap" id="roadmap">
-  <h2>On the roadmap</h2>
-  <p class="roadmap-note">None of these exist yet. They are what we want to build next.</p>
-  <ul>
-    <li><b>Guided courses.</b> Lessons that take you from your first line of code to real projects.</li>
-    <li><b>An AI tutor.</b> Hints and guidance first, the full answer only when you ask.</li>
-    <li><b>Community.</b> Shared solutions, questions and answers, with moderation from day one.</li>
-    <li><b>Streaks and XP.</b> Progress that rewards consistency.</li>
-    <li><b>Kotlin and SQL.</b> More languages on the same engine.</li>
-    <li data-when="limited"><b>Accounts, saved projects and certificates</b> on this server. They need the full backend.</li>
-  </ul>
-</section>
-
-<footer class="foot">
-  <div class="wrap foot-in">
-    <span>A CagedDragons product.</span>
-    <span class="foot-links"><a href="../app/">Editor</a><a href="../app/#problems">Problems</a></span>
-  </div>
-</footer>
-
-<script src="../assets/config.js"></script>
-<script src="../assets/highlight.js"></script>
-<script src="../assets/editor.js"></script>
-<script src="app.js"></script>
+    <div id="account-user" hidden>
+      <div class="account-user-card"><span class="account-avatar" id="account-avatar">D</span><div><strong id="account-user-email">Signed in</strong><span>Personal compiler workspace</span></div><button class="panel-secondary" id="account-signout" type="button">Sign out</button></div>
+      <section class="panel-section"><div class="panel-section-head"><div><h3>Add languages</h3><p>Unlock another compiler for this account.</p></div></div><div class="language-add-grid">
+        <button type="button" data-add-language="java"><span>Java</span><small>JDK compiler</small><b>＋</b></button>
+        <button type="button" data-add-language="c"><span>C</span><small>GCC compiler</small><b>＋</b></button>
+        <button type="button" data-add-language="cpp"><span>C++</span><small>G++ compiler</small><b>＋</b></button>
+      </div><div id="installed-language-list" class="installed-list"></div></section>
+      <section class="panel-section"><div class="panel-section-head"><div><h3>Add packages</h3><p>Packages are installed into an isolated run environment.</p></div></div>
+        <label for="package-language">Language</label><select id="package-language" class="panel-select"><option value="python">Python</option><option value="javascript">JavaScript</option></select>
+        <label for="package-name">Package name</label><input id="package-name" type="text" autocomplete="off" placeholder="e.g. pandas or lodash">
+        <label for="package-version">Version <span class="optional-label">optional</span></label><input id="package-version" type="text" autocomplete="off" placeholder="Latest version">
+        <button class="panel-primary panel-wide" id="account-add-package" type="button">Add package</button>
+        <div class="package-suggestions" id="package-suggestions"></div>
+        <div id="installed-package-list" class="installed-list"></div>
+      </section>
+    </div>
+    <div class="account-panel-foot">Package downloads are restricted to trusted registries during setup. User code runs after sandbox network access is locked down.</div>
+  </aside>
+  <div class="account-panel-scrim" id="account-panel-scrim" hidden></div>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <script src="./assets/config.js"></script>
+  <script src="./assets/highlight.js"></script>
+  <script src="./assets/editor.js"></script>
+  <script src="./app/app.js"></script>
 </body>
 </html>

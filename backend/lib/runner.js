@@ -1,4 +1,4 @@
-// DracoSkill (Vercel) — runs ONE program in a fresh Vercel Sandbox microVM.
+// Draco Code (Vercel) — runs ONE program in a fresh Vercel Sandbox microVM.
 //
 // Every run gets its own microVM with all outbound network blocked ('deny-all'),
 // is never persisted, and is stopped when finished. That is stronger isolation
@@ -24,7 +24,7 @@ const JAVA_FLAGS = '-Xmx256m -Xss1m -XX:+UseSerialGC -XX:TieredStopAtLevel=1';
 
 // Tests replace this to run against a local stand-in instead of real microVMs.
 export async function defaultFactory() {
-  const params = { timeout: 90_000, persistent: false, networkPolicy: 'deny-all', resources: { vcpus: 1 } };
+  const params = { timeout: 90_000, persistent: false, networkPolicy: 'deny-all', resources: { vcpus: 1 }, region: process.env.DRACO_SANDBOX_REGION || 'iad1' };
   const snapshotId = await findSnapshotId(); // env override, else the snapshot made by /setup
   if (snapshotId) params.source = { type: 'snapshot', snapshotId };
   return Sandbox.create(params);
@@ -42,10 +42,11 @@ export function snippetFile(language, code) {
 }
 
 export class RunSession {
-  constructor(language, code, factory = getFactory()) {
+  constructor(language, code, factory = getFactory(), packages = []) {
     this.language = language;
     this.code = code;
     this.factory = factory;
+    this.packages = Array.isArray(packages) ? packages : [];
     this.sb = null;
     const f = snippetFile(language, code);
     this.file = f.file;
@@ -55,8 +56,34 @@ export class RunSession {
   async open() {
     this.sb = await this.factory();
     await this.sb.writeFiles([{ path: `${ROOT}/${this.file}`, content: Buffer.from(this.code, 'utf8') }]);
+    await this.installPackages();
   }
 
+  async installPackages() {
+    if (!this.packages.length) return;
+    const sb=this.sb, language=this.language;
+    const specs=this.packages.map(p=>({name:String(p.name||''),version:String(p.version||'')}));
+    if (language==='python') {
+      await sb.update({networkPolicy:{allow:['pypi.org','files.pythonhosted.org']}});
+      const args=['install','--disable-pip-version-check','--no-input','--target',`${ROOT}/.draco-python`,...specs.map(p=>p.name+(p.version?'=='+p.version:''))];
+      const result=await sb.runCommand({cmd:'python3',args:['-m','pip',...args]}); if(result.exitCode!==0) throw new Error('Python package installation failed. Check package names and versions.');
+    } else if (language==='javascript') {
+      await sb.update({networkPolicy:{allow:['registry.npmjs.org']}});
+      const args=['install','--ignore-scripts','--no-audit','--no-fund','--prefix',`${ROOT}/.draco-node`,...specs.map(p=>p.name+(p.version?'@'+p.version:''))];
+      const result=await sb.runCommand({cmd:'npm',args}); if(result.exitCode!==0) throw new Error('JavaScript package installation failed. Check package names and versions.');
+    } else if (language==='java') {
+      await sb.update({networkPolicy:{allow:['repo.maven.apache.org']}}); await sb.runCommand({cmd:'mkdir',args:['-p',`${ROOT}/.draco-java`]});
+      for(const p of specs){const [group,artifact,version]=p.name.split(':');if(!group||!artifact||!version||![group,artifact,version].every(x=>/^[A-Za-z0-9_.-]+$/.test(x)))throw new Error('Java packages must use group:artifact:version coordinates.');const url=`https://repo.maven.apache.org/maven2/${group.replace(/\./g,'/')}/${artifact}/${version}/${artifact}-${version}.jar`;const result=await sb.runCommand({cmd:'curl',args:['-fsSL',url,'-o',`${ROOT}/.draco-java/${artifact}-${version}.jar`]});if(result.exitCode!==0)throw new Error(`Could not download Java dependency ${p.name}.`);}
+    } else if (language==='c'||language==='cpp') {
+      const allowed=language==='c'?new Set(['libsqlite3-dev','libssl-dev','libcurl4-openssl-dev']):new Set(['nlohmann-json3-dev','libboost-dev','libeigen3-dev','libfmt-dev']);
+      if(specs.some(p=>!allowed.has(p.name)))throw new Error('This C/C++ package is not in the supported system-library catalogue.');
+      await sb.update({networkPolicy:{allow:['*.ubuntu.com','archive.ubuntu.com','security.ubuntu.com','ports.ubuntu.com','packages.ubuntu.com']}});
+      await sb.runCommand({cmd:'sed',args:['-i','s|http://|https://|g','/etc/apt/sources.list.d/ubuntu.sources'],sudo:true});
+      const update=await sb.runCommand({cmd:'apt-get',args:['update','-qq'],sudo:true});if(update.exitCode!==0)throw new Error('Could not refresh the C/C++ package catalogue.');
+      const install=await sb.runCommand({cmd:'apt-get',args:['install','-y','--no-install-recommends',...specs.map(p=>p.name)],sudo:true});if(install.exitCode!==0)throw new Error('C/C++ package installation failed.');
+    }
+    await sb.update({networkPolicy:'deny-all'});
+  }
   async close() {
     try { await this.sb?.stop(); } catch { /* already stopped / expired */ }
   }
@@ -102,18 +129,18 @@ export class RunSession {
     const l = this.language;
     if (l === 'java') {
       if (!/^[A-Za-z_]\w*$/.test(this.cls)) return { error: 'Invalid Java class name.' };
-      return this.phase('compile', `mkdir -p build && javac -nowarn -encoding UTF-8 -J-Xmx256m -J-XX:+UseSerialGC -d build ${this.file}`, { timeoutSec: COMPILE_TIMEOUT });
+      return this.phase('compile', `mkdir -p build && javac -nowarn -encoding UTF-8 -J-Xmx256m -J-XX:+UseSerialGC -cp '.draco-java/*' -d build ${this.file}`, { timeoutSec: COMPILE_TIMEOUT });
     }
-    if (l === 'c') return this.phase('compile', `gcc -std=gnu17 -O1 -Wall -pipe -o app ${this.file} -lm -lpthread`, { timeoutSec: COMPILE_TIMEOUT });
-    if (l === 'cpp') return this.phase('compile', `g++ -std=gnu++17 -O1 -Wall -pipe -o app ${this.file} -lm -lpthread`, { timeoutSec: COMPILE_TIMEOUT });
+    if (l === 'c') { const flags=[]; const names=this.packages.map(p=>p.name); if(names.includes('libsqlite3-dev'))flags.push('-lsqlite3'); if(names.includes('libssl-dev'))flags.push('-lssl','-lcrypto'); if(names.includes('libcurl4-openssl-dev'))flags.push('-lcurl'); return this.phase('compile', `gcc -std=gnu17 -O1 -Wall -pipe -o app ${this.file} -lm -lpthread ${flags.join(' ')}`, { timeoutSec: COMPILE_TIMEOUT }); }
+    if (l === 'cpp') { const flags=[]; const names=this.packages.map(p=>p.name); if(names.includes('libfmt-dev'))flags.push('-lfmt'); if(names.includes('libeigen3-dev'))flags.push('-I/usr/include/eigen3'); return this.phase('compile', `g++ -std=gnu++17 -O1 -Wall -pipe -o app ${this.file} -lm -lpthread ${flags.join(' ')}`, { timeoutSec: COMPILE_TIMEOUT }); }
     return null;
   }
 
   runCommandText() {
     switch (this.language) {
-      case 'python': return `python3 ${this.file}`;
-      case 'javascript': return `node ${this.file}`;
-      case 'java': return `java ${JAVA_FLAGS} -cp build ${this.cls}`;
+      case 'python': return `PYTHONPATH=${ROOT}/.draco-python:${'${PYTHONPATH:-}'} python3 ${this.file}`;
+      case 'javascript': return `NODE_PATH=${ROOT}/.draco-node/node_modules:${'${NODE_PATH:-}'} node ${this.file}`;
+      case 'java': return `java ${JAVA_FLAGS} -cp 'build:.draco-java/*' ${this.cls}`;
       default: return './app';
     }
   }
@@ -127,8 +154,16 @@ export class RunSession {
 const missingTool = (r) => r.exitCode === 127 && /not found/i.test(r.stderr || '');
 
 export function setupUrl() {
-  const host = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
-  return host ? `https://${host}/setup` : '<your backend address>/setup';
+  const configured = String(process.env.DRACO_BACKEND_URL || '').trim();
+  const deploymentHost = String(process.env.VERCEL_URL || '').trim();
+  const host = configured || (deploymentHost ? `https://${deploymentHost}` : 'https://draco-code-backend.vercel.app');
+  try {
+    const url = new URL(host.includes('://') ? host : `https://${host}`);
+    if (url.protocol !== 'https:' || url.username || url.password) throw new Error('Invalid backend URL');
+    return `${url.origin}/setup`;
+  } catch {
+    return 'https://draco-code-backend.vercel.app/setup';
+  }
 }
 
 function missingMessage(language) {
@@ -146,13 +181,14 @@ export function compileFailure(c) {
 }
 
 // Single snippet. Returns [result, httpStatus].
-export async function execute(language, code, stdin = '', factory = getFactory()) {
+export async function execute(language, code, stdin = '', factory = getFactory(), options = {}) {
   if (!RUN_LANGUAGES.includes(language)) return [{ error: `Unsupported language: ${language}. Supported: ${RUN_LANGUAGES.join(', ')}.` }, 400];
   if (typeof code !== 'string' || !code.trim()) return [{ error: 'No code submitted' }, 400];
   if (code.length > MAX_CODE) return [{ error: 'Code is too large (200 KB max).' }, 413];
   if ((stdin || '').length > MAX_STDIN) return [{ error: 'Input is too large (100 KB max).' }, 413];
 
-  const s = new RunSession(language, code, factory);
+  const packages = Array.isArray(options.packages) ? options.packages : [];
+  const s = new RunSession(language, code, factory, packages);
   try {
     await s.open();
     const c = await s.prepare();
