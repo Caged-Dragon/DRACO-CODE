@@ -66,7 +66,7 @@ export class RunSession {
     if (language==='python') {
       await sb.update({networkPolicy:{allow:['pypi.org','files.pythonhosted.org']}});
       const args=['install','--disable-pip-version-check','--no-input','--target',`${ROOT}/.draco-python`,...specs.map(p=>p.name+(p.version?'=='+p.version:''))];
-      const result=await sb.runCommand({cmd:'python3',args}); if(result.exitCode!==0) throw new Error('Python package installation failed. Check package names and versions.');
+      const result=await sb.runCommand({cmd:'python3',args:['-m','pip',...args]}); if(result.exitCode!==0) throw new Error('Python package installation failed. Check package names and versions.');
     } else if (language==='javascript') {
       await sb.update({networkPolicy:{allow:['registry.npmjs.org']}});
       const args=['install','--ignore-scripts','--no-audit','--no-fund','--prefix',`${ROOT}/.draco-node`,...specs.map(p=>p.name+(p.version?'@'+p.version:''))];
