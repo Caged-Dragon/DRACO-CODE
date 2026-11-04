@@ -528,6 +528,12 @@
     if(!accountUser){openAccountPanel();showToast('Sign in to save packages to your account.');return;}
     const language=$('package-language').value,name=$('package-name').value.trim(),version=$('package-version').value.trim();
     if(!name){showToast('Enter a package name.');return;}if(!canUseLanguage(language)){showToast('Add this language to your account first.');return;}
+    const validName = language==='python' ? /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/.test(name)
+      : language==='javascript' ? /^(?:@[a-z0-9][a-z0-9._-]{0,49}\\/)?[a-z0-9][a-z0-9._-]{0,99}$/i.test(name)
+      : language==='java' ? /^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$/.test(name)
+      : language==='c' ? ['libsqlite3-dev','libssl-dev','libcurl4-openssl-dev'].includes(name)
+      : ['nlohmann-json3-dev','libboost-dev','libeigen3-dev','libfmt-dev'].includes(name);
+    if(!validName){showToast('Choose a supported package from this language catalogue.');return;}
     if(version&&!/^[A-Za-z0-9.+_-]{1,80}$/.test(version)){showToast('Version contains unsupported characters.');return;}
     if(installedPackages.some(p=>p.language===language&&p.package_name.toLowerCase()===name.toLowerCase())){showToast('That package is already on your account.');return;}
     accountBusy=true;$('account-add-package').disabled=true;
