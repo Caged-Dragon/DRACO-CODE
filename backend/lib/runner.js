@@ -179,7 +179,8 @@ export async function execute(language, code, stdin = '', factory = getFactory()
   if (code.length > MAX_CODE) return [{ error: 'Code is too large (200 KB max).' }, 413];
   if ((stdin || '').length > MAX_STDIN) return [{ error: 'Input is too large (100 KB max).' }, 413];
 
-  const packages = Array.isArray(options.packages) ? options.packages : [];\n  const s = new RunSession(language, code, factory, packages);
+  const packages = Array.isArray(options.packages) ? options.packages : [];
+  const s = new RunSession(language, code, factory, packages);
   try {
     await s.open();
     const c = await s.prepare();
