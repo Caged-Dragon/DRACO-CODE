@@ -64,3 +64,16 @@ assert.match(app, /supabaseClient\.auth\.signOut/);
 assert.match(app, /persistSession: true/);
 assert.match(app, /emailRedirectTo: authRedirectUrl\(\)/);
 assert.match(app, /confirm your email using the link we sent/i);
+
+assert.match(html, /id="layout-toggle-button"/);
+assert.match(html, /id="layout-toggle-label">Split view/);
+assert.match(html, /aria-expanded="true" aria-controls="stdin-wrap"/);
+assert.doesNotMatch(html, /id="stdin-wrap" hidden/);
+assert.match(app, /const LAYOUT_STORAGE_KEY = 'draco-code-layout-v1'/);
+assert.match(app, /function loadSavedLayout\(\)/);
+assert.match(app, /function setLayout\(layout\)/);
+assert.match(app, /function toggleLayout\(\)/);
+assert.match(app, /layout-toggle-button.*toggleLayout/s);
+assert.match(app, /localStorage\.setItem\(LAYOUT_STORAGE_KEY, selected\)/);
+assert.match(css, /\.main-column\[data-layout="split"\]/);
+assert.match(css, /\.main-column\[data-layout="stacked"\]/);
