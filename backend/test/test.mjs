@@ -337,5 +337,33 @@ await t('guest execution is blocked for account-only languages before sandbox al
   finally {for(const k of keys){if(prior[k]===undefined)delete process.env[k];else process.env[k]=prior[k];}}
 });
 
+await t('signed-in account can run an installed language with a Supabase JWT', async () => {
+  const keys=['VERCEL','SUPABASE_URL','SUPABASE_ANON_KEY','CODE_BACKEND_SHARED_SECRET','CODE_RATE_LIMIT_SECRET'];
+  const prior=Object.fromEntries(keys.map(k=>[k,process.env[k]]));
+  const originalFetch=globalThis.fetch;
+  process.env.VERCEL='1';process.env.SUPABASE_URL='https://gbeurqibcfvquacasofq.supabase.co';process.env.SUPABASE_ANON_KEY='sb_publishable_test_key';process.env.CODE_BACKEND_SHARED_SECRET='backend-test-secret-that-is-over-32-chars';process.env.CODE_RATE_LIMIT_SECRET='rate-test-secret-that-is-over-32-characters';
+  globalThis.fetch=async (url,options={})=>{
+    const target=String(url);
+    if(target.endsWith('/auth/v1/user')){assert.equal(options.headers.Authorization,'Bearer valid.jwt.token');return new Response(JSON.stringify({id:'user-123',email:'user@example.com'}),{status:200});}
+    if(target.includes('/rest/v1/draco_user_languages'))return new Response(JSON.stringify([{language:'java'}]),{status:200});
+    if(target.includes('/rest/v1/draco_user_packages'))return new Response(JSON.stringify([]),{status:200});
+    throw new Error('Unexpected Supabase request: '+target);
+  };
+  globalThis.__DRACO_SUPABASE_FETCH=async (url,options)=>{
+    assert.equal(options.headers.apikey,'sb_publishable_test_key');
+    assert.equal(options.headers.Authorization,undefined,'publishable key must not be sent as a bearer token');
+    if(String(url).endsWith('/code_consume_run'))return new Response(JSON.stringify([{is_allowed:true,remaining_requests:19,reset_at:new Date(Date.now()+60000).toISOString()}]),{status:200});
+    return new Response(null,{status:204});
+  };
+  try{
+    const before=fake.created;
+    const r=await call('POST','/execute',{language:'java',code:'public class Main { public static void main(String[] args) { System.out.println(42); } }'},{authorization:'Bearer valid.jwt.token',origin:SITE});
+    assert.equal(r.status,200,JSON.stringify(r.json));assert.equal(r.json.stdout.trim(),'42');assert.equal(fake.created,before+1);
+  }finally{
+    globalThis.fetch=originalFetch;delete globalThis.__DRACO_SUPABASE_FETCH;
+    for(const k of keys){if(prior[k]===undefined)delete process.env[k];else process.env[k]=prior[k];}
+  }
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

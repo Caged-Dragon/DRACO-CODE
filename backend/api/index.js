@@ -155,7 +155,7 @@ function bodyObject(req) {
 }
 
 async function authenticatedUser(req, config) {
-  const match=/^Bearer\\s+([A-Za-z0-9._~-]+)$/i.exec(String(req.headers?.authorization||'')); if(!match)return null;
+  const match=/^Bearer\s+([A-Za-z0-9._~-]+)$/i.exec(String(req.headers?.authorization||'')); if(!match)return null;
   const response=await fetch(`${config.url}/auth/v1/user`,{headers:{apikey:config.anonKey,Authorization:`Bearer ${match[1]}`},signal:AbortSignal.timeout(7000)});
   if(!response.ok)throw new Error('Invalid or expired account session.'); const user=await response.json();
   return user&&typeof user.id==='string'?{user,token:match[1]}:null;
