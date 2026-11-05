@@ -11,21 +11,27 @@
   <link rel="preload" href="./assets/fonts/jetbrains-mono.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="./assets/design.css">
   <link rel="stylesheet" href="./app/styles.css">
+  <link rel="stylesheet" href="./app/project.css">
   <script src="./assets/theme.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4"></script>
   <title>Draco Code — Online Compiler</title>
 </head>
-<body>
+<body data-mode="compiler">
   <div class="app-shell">
     <header class="topbar">
-      <a class="brand" href="./" aria-label="Draco Code home">
-        <img src="./assets/dracoskill-mark.png" alt="" width="32" height="32">
-        <span class="brand-name">Draco<span>Code</span></span>
-        <span class="brand-divider" aria-hidden="true"></span>
-        <span class="brand-caption">CAGED DRAGON</span>
-      </a>
-
-      <button class="icon-button account-menu-button" id="account-menu-button" type="button" aria-label="Open account and packages panel" aria-expanded="false" title="Account, languages and packages"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+      <div class="topbar-left">
+        <button class="icon-button" id="menu-button" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="menu-drawer" title="Menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+        <button class="signin-button" id="signin-button" type="button" title="Sign in or create an account" aria-label="Sign in">
+          <span class="signin-avatar" id="signin-avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.6"/><path d="M5 20c.8-3.6 3.8-5.4 7-5.4s6.2 1.8 7 5.4"/></svg></span>
+          <span class="signin-label" id="signin-label">Sign in</span>
+        </button>
+        <a class="brand" href="./" aria-label="Draco Code home">
+          <img src="./assets/dracoskill-mark.png" alt="" width="32" height="32">
+          <span class="brand-name">Draco<span>Code</span></span>
+          <span class="brand-divider" aria-hidden="true"></span>
+          <span class="brand-caption">CAGED DRAGON</span>
+        </a>
+      </div>
       <div class="topbar-actions">
         <span id="connection-chip" class="connection-chip checking" role="status" aria-live="polite">
           <span class="connection-dot"></span><span id="connection-label">Connecting</span>
@@ -54,8 +60,8 @@
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.2v11.6a.6.6 0 0 0 .9.5l9-5.8a.6.6 0 0 0 0-1l-9-5.8a.6.6 0 0 0-.9.5Z" fill="currentColor"/></svg>
           <span id="run-label">Run</span><kbd>Ctrl ↵</kbd>
         </button>
-        <button class="mobile-menu-button" id="mobile-menu-button" type="button" aria-label="Toggle files" aria-expanded="true">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        <button class="mobile-menu-button" id="mobile-menu-button" type="button" aria-label="Toggle programs list" aria-expanded="true">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5a1.5 1.5 0 0 1 1.5-1.5h4l2 2.2h8a1.5 1.5 0 0 1 1.5 1.5v7.8a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5Z"/></svg>
         </button>
       </div>
     </header>
@@ -127,6 +133,82 @@
       </section>
     </main>
 
+    <section class="ide" id="project-ide" aria-label="Project mode" hidden>
+      <div class="ide-gate" id="ide-gate" hidden>
+        <div class="ide-gate-card">
+          <h2 id="ide-gate-title">Project mode is for account holders</h2>
+          <p id="ide-gate-text">Sign in to keep multi-file projects in your account and open them from any device.</p>
+          <button class="panel-primary" id="ide-gate-signin" type="button">Sign in or create an account</button>
+        </div>
+      </div>
+      <div class="ide-body" id="ide-body">
+        <nav class="ide-activity" aria-label="Project mode views">
+          <button class="ide-act active" id="act-explorer" type="button" title="Explorer" aria-label="Explorer"><svg viewBox="0 0 24 24"><path d="M6 3.5h8l4 4V20a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 6 20Z"/><path d="M14 3.5V8h4"/></svg></button>
+          <button class="ide-act" id="act-projects" type="button" title="Projects" aria-label="Projects"><svg viewBox="0 0 24 24"><path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4l2 2.2h8A1.5 1.5 0 0 1 20.5 9v8.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5Z"/></svg></button>
+          <button class="ide-act" id="act-run" type="button" title="Run project (Ctrl+Enter)" aria-label="Run project"><svg viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5Z"/></svg></button>
+          <span class="ide-act-spacer"></span>
+          <button class="ide-act" id="act-packages" type="button" title="Languages and packages" aria-label="Languages and packages"><svg viewBox="0 0 24 24"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></svg></button>
+        </nav>
+        <aside class="ide-side" id="ide-side">
+          <div class="ide-side-view" id="view-explorer">
+            <div class="ide-side-head"><span>Explorer</span>
+              <span class="ide-side-actions">
+                <button type="button" id="tree-new-file" title="New file" aria-label="New file"><svg viewBox="0 0 24 24"><path d="M6 3.5h8l4 4V20.5H6Z"/><path d="M12 11v6M9 14h6"/></svg></button>
+                <button type="button" id="tree-new-folder" title="New folder" aria-label="New folder"><svg viewBox="0 0 24 24"><path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4l2 2.2h8A1.5 1.5 0 0 1 20.5 9v8.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5Z"/><path d="M12 10.5v5M9.5 13h5"/></svg></button>
+                <button type="button" id="tree-collapse" title="Collapse folders" aria-label="Collapse folders"><svg viewBox="0 0 24 24"><path d="M5 9h14M5 15h14"/></svg></button>
+              </span>
+            </div>
+            <div class="ide-project-title" id="ide-project-title"><span class="ide-caret">⌄</span><b id="ide-project-name">No project</b><span class="ide-project-lang" id="ide-project-lang"></span></div>
+            <div class="ide-tree" id="ide-tree" role="tree" aria-label="Project files"></div>
+          </div>
+          <div class="ide-side-view" id="view-projects" hidden>
+            <div class="ide-side-head"><span>Projects</span>
+              <span class="ide-side-actions"><button type="button" id="project-new" title="New project" aria-label="New project"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button></span>
+            </div>
+            <div class="ide-projects" id="ide-projects"></div>
+          </div>
+        </aside>
+        <div class="ide-main" id="ide-main">
+          <div class="seam" aria-hidden="true"></div>
+          <div class="ide-tabbar">
+            <div class="ide-tabs" id="ide-tabs" role="tablist" aria-label="Open files"></div>
+            <div class="ide-tab-actions">
+              <button type="button" id="ide-save" title="Save (Ctrl+S)" aria-label="Save file"><svg viewBox="0 0 24 24"><path d="M5 4.5h11l3 3V19.5H5Z"/><path d="M8 4.5v5h7v-5M8 19.5v-6h8v6"/></svg></button>
+              <button type="button" id="ide-run" class="ide-run" title="Run project (Ctrl+Enter)" aria-label="Run project"><svg viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5Z"/></svg></button>
+            </div>
+          </div>
+          <div class="ide-crumbs" id="ide-crumbs" aria-label="File path"></div>
+          <div class="ide-editors" id="ide-editors">
+            <div class="ide-welcome" id="ide-welcome"><div><strong>Open a file to start editing</strong><p>Pick a file in the explorer, or create one with the + icon. Changes save to your account automatically.</p></div></div>
+          </div>
+          <div class="ide-resizer" id="ide-resizer" role="separator" aria-orientation="horizontal" aria-label="Resize panel" tabindex="0"></div>
+          <section class="ide-panel" id="ide-panel" aria-label="Output panel">
+            <div class="ide-panel-head">
+              <div class="ide-panel-tabs" role="tablist">
+                <button type="button" role="tab" class="active" data-panel="output">Output</button>
+                <button type="button" role="tab" data-panel="problems">Problems <span class="ide-count" id="problems-count" hidden>0</span></button>
+                <button type="button" role="tab" data-panel="input">Input</button>
+              </div>
+              <div class="ide-panel-actions"><span class="ide-run-meta" id="ide-run-meta"></span><button type="button" id="panel-clear" title="Clear output" aria-label="Clear output"><svg viewBox="0 0 24 24"><path d="M5 7h14M9 7V5h6v2M7 7l1 12h8l1-12"/></svg></button><button type="button" id="panel-toggle" title="Hide panel" aria-label="Hide panel"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button></div>
+            </div>
+            <div class="ide-panel-body" id="panel-output" role="tabpanel"><div class="ide-empty">Run the project to see its output here.</div></div>
+            <div class="ide-panel-body" id="panel-problems" role="tabpanel" hidden><div class="ide-empty">No problems detected.</div></div>
+            <div class="ide-panel-body" id="panel-input" role="tabpanel" hidden><label for="ide-stdin" class="sr-only">Standard input</label><textarea id="ide-stdin" placeholder="Text your program reads from standard input…" spellcheck="false"></textarea></div>
+          </section>
+        </div>
+      </div>
+      <footer class="ide-status" id="ide-status">
+        <span id="ide-st-run" class="ide-st-run">Idle</span>
+        <span class="ide-st-spacer"></span>
+        <span id="ide-st-entry"></span>
+        <span id="ide-st-save">Saved</span>
+        <span id="ide-st-pos">Ln 1, Col 1</span>
+        <span>Spaces: 4</span><span>UTF-8</span>
+        <span id="ide-st-lang">Plain text</span>
+        <span id="ide-st-conn">Connected</span>
+      </footer>
+    </section>
+
     <footer class="app-footer">
       <div class="runtime-list" id="runtime-list" aria-label="Runtime availability">
         <span class="runtime-caption">RUNTIMES</span><span class="runtime-pill pending">Python</span><span class="runtime-pill pending">JavaScript</span><span class="runtime-pill pending">Java</span><span class="runtime-pill pending">C</span><span class="runtime-pill pending">C++</span>
@@ -135,14 +217,43 @@
     </footer>
   </div>
 
+  <aside class="menu-drawer" id="menu-drawer" aria-label="Main menu" aria-hidden="true">
+    <div class="menu-head"><span class="menu-title">Menu</span><button class="icon-button" id="menu-close" type="button" aria-label="Close menu">×</button></div>
+    <nav class="menu-list">
+      <button class="menu-item active" type="button" data-mode="compiler" id="menu-compiler"><svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 5.5l-3 13"/></svg><span><b>Compiler</b><small>Write and run one file</small></span></button>
+      <button class="menu-item" type="button" data-mode="project" id="menu-project"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="1.8"/><path d="M9 4.5v15M3.5 10h5.5"/></svg><span><b>Project mode</b><small>Multi-file workspace saved to your account</small></span><em class="menu-badge" id="menu-project-badge">Account</em></button>
+      <button class="menu-item" type="button" id="menu-packages"><svg viewBox="0 0 24 24"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></svg><span><b>Languages and packages</b><small>Add Java, C, C++ and libraries</small></span></button>
+    </nav>
+    <div class="menu-foot" id="menu-foot">Guest. Python and JavaScript are available without an account.</div>
+  </aside>
+  <div class="menu-scrim" id="menu-scrim" hidden></div>
+
+  <div class="auth-scrim" id="auth-scrim" hidden></div>
+  <div class="auth-dialog" id="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title" hidden>
+    <button class="icon-button auth-close" id="auth-close" type="button" aria-label="Close">×</button>
+    <img class="auth-mark" src="./assets/dracoskill-mark.png" alt="" width="44" height="44">
+    <h2 id="auth-title">Sign in to Draco Code</h2>
+    <p class="auth-sub" id="auth-sub">Use your account to unlock more languages and keep projects.</p>
+    <div class="auth-tabs" role="tablist" aria-label="Account">
+      <button type="button" role="tab" id="auth-tab-signin" aria-selected="true">Sign in</button>
+      <button type="button" role="tab" id="auth-tab-signup" aria-selected="false">Create account</button>
+    </div>
+    <form id="auth-form" novalidate>
+      <label for="account-email">Email</label>
+      <input id="account-email" type="email" autocomplete="email" placeholder="you@example.com" inputmode="email">
+      <label for="account-password">Password</label>
+      <div class="pw-wrap"><input id="account-password" type="password" autocomplete="current-password" placeholder="At least 8 characters"><button type="button" id="auth-pw-toggle" aria-label="Show password">Show</button></div>
+      <p id="account-auth-message" class="account-message" role="status"></p>
+      <button class="panel-primary panel-wide" id="auth-submit" type="submit">Sign in</button>
+    </form>
+    <p class="auth-note">New users are saved in Supabase Auth. If email confirmation is enabled, confirm your address before signing in. Guests can still run Python and JavaScript.</p>
+  </div>
+
   <aside class="account-panel" id="account-panel" aria-label="Account, languages and packages" aria-hidden="true">
     <div class="account-panel-head"><div><span class="eyebrow">DRACO ACCOUNT</span><h2>Languages & packages</h2></div><button class="icon-button" id="account-panel-close" type="button" aria-label="Close panel">×</button></div>
     <div id="account-guest" class="account-auth">
-      <p class="account-copy">Sign in or create an account to unlock Java, C and C++. New users are saved in Supabase Auth. If email confirmation is enabled, confirm your address before signing in.</p>
-      <label for="account-email">Email</label><input id="account-email" type="email" autocomplete="email" placeholder="you@example.com">
-      <label for="account-password">Password</label><input id="account-password" type="password" autocomplete="current-password" placeholder="At least 8 characters">
-      <div class="account-auth-actions"><button class="panel-primary" id="account-signin" type="button">Sign in</button><button class="panel-secondary" id="account-signup" type="button">Create account</button></div>
-      <p id="account-auth-message" class="account-message" role="status"></p>
+      <p class="account-copy">Sign in or create an account to unlock Java, C, C++, packages and Project mode.</p>
+      <button class="panel-primary panel-wide" id="account-open-auth" type="button">Sign in or create account</button>
       <div class="guest-access-note"><strong>Guest access</strong><span>Python and JavaScript are ready without an account.</span></div>
     </div>
     <div id="account-user" hidden>
@@ -168,6 +279,9 @@
   <script src="./assets/config.js"></script>
   <script src="./assets/highlight.js"></script>
   <script src="./assets/editor.js"></script>
+  <script src="./app/project-core.js"></script>
+  <script src="./app/project-data.js"></script>
   <script src="./app/app.js"></script>
+  <script src="./app/project.js"></script>
 </body>
 </html>

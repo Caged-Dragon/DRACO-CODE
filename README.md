@@ -64,3 +64,12 @@ The frontend is a static site, so its Vercel build runs `frontend/scripts/build.
 Set the same three values on both existing Vercel projects for each environment (Production, Preview, Development). The frontend build embeds them in the browser bundle; the backend reads the Supabase values server-side. The backend also requires `CODE_BACKEND_SHARED_SECRET` and `CODE_RATE_LIMIT_SECRET`; never add those to the frontend project. Never put a Supabase secret/service-role key in the frontend. Vercel environment-variable changes require a new deployment.
 
 For local frontend builds, export those three variables before running `node scripts/build.mjs` from `frontend/`. The tracked `assets/config.js` is only a localhost fallback and intentionally contains no Supabase key.
+
+
+## Project mode and the new top bar (update)
+
+- The top bar now reads **menu button → Sign in → brand** at the left edge. Sign in opens a dedicated sign-in / create-account dialog.
+- The menu has **Compiler**, **Project mode** and **Languages and packages**. Project mode is a VS Code-style workspace for signed-in users: projects, folders, multiple files and tabs, autosave to Supabase, run the whole project (entry file), Problems panel, stdin.
+- Data lives in `public.draco_projects` and `public.draco_project_files` with row-level security (`supabase/migrations/20261105090000_draco_projects.sql`). **Apply this migration once** (Supabase Dashboard → SQL Editor → paste → Run, or `supabase db push`). It is additive and safe to run twice.
+- The backend `POST /execute` also accepts `{ language, files:[{path,content}], entry, stdin }` for project runs. This requires a signed-in user and the same per-language account checks as single-file runs.
+- Not included on purpose: an interactive terminal. Each run is a fresh, network-isolated sandbox, so there is no persistent shell.

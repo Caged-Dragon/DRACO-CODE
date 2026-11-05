@@ -1,11 +1,15 @@
 // Offline shell for Draco Code. Drafts and theme preference remain in local storage;
 // execution requests are cross-origin and are deliberately never cached or intercepted.
-const VERSION = 'draco-shell-v4';
+const VERSION = 'draco-shell-v5';
 const CACHE = VERSION;
 const SHELL = [
   './',
   'app/styles.css',
   'app/app.js',
+  'app/project.css',
+  'app/project-core.js',
+  'app/project-data.js',
+  'app/project.js',
   'assets/design.css',
   'assets/theme.js',
   'assets/highlight.js',

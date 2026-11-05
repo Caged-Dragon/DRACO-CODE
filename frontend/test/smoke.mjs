@@ -11,24 +11,34 @@ const css = await readFile(path.join(root, 'app/styles.css'), 'utf8');
 const sw = await readFile(path.join(root, 'sw.js'), 'utf8');
 
 const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]));
-const referenced = new Set([...app.matchAll(/\$\('([^']+)'\)/g)].map((m) => m[1]));
-const missing = [...referenced].filter((id) => !ids.has(id));
+const projectJs = await readFile(path.join(root, 'app/project.js'), 'utf8');
+const referenced = new Set([...app.matchAll(/\$\('([^']+)'\)/g), ...projectJs.matchAll(/\$\('([^']+)'\)/g)].map((m) => m[1]));
+const DYNAMIC_IDS = new Set(['ide-context']); // created at runtime by project.js (right-click menu)
+const missing = [...referenced].filter((id) => !ids.has(id) && !DYNAMIC_IDS.has(id));
 assert.deepEqual(missing, [], `App references missing DOM IDs: ${missing.join(', ')}`);
 
-for (const [name, content] of [['app.js', app], ['config.js', config], ['editor.js', await readFile(path.join(root, 'assets/editor.js'), 'utf8')], ['highlight.js', await readFile(path.join(root, 'assets/highlight.js'), 'utf8')], ['theme.js', await readFile(path.join(root, 'assets/theme.js'), 'utf8')]]) {
+for (const [name, content] of [['app.js', app], ['project.js', projectJs], ['project-core.js', await readFile(path.join(root, 'app/project-core.js'), 'utf8')], ['project-data.js', await readFile(path.join(root, 'app/project-data.js'), 'utf8')], ['config.js', config], ['editor.js', await readFile(path.join(root, 'assets/editor.js'), 'utf8')], ['highlight.js', await readFile(path.join(root, 'assets/highlight.js'), 'utf8')], ['theme.js', await readFile(path.join(root, 'assets/theme.js'), 'utf8')]]) {
   const { spawnSync } = await import('node:child_process');
   const result = spawnSync(process.execPath, ['--check', '--input-type=commonjs'], { input: content, encoding: 'utf8' });
   assert.equal(result.status, 0, `${name} syntax error: ${result.stderr}`);
 }
 
-for (const asset of ['assets/design.css', 'assets/theme.js', 'assets/highlight.js', 'assets/editor.js', 'assets/config.js', 'app/styles.css', 'app/app.js', 'assets/dracoskill-mark.png', 'assets/icons/favicon-32.png']) {
+for (const asset of ['assets/design.css', 'assets/theme.js', 'assets/highlight.js', 'assets/editor.js', 'assets/config.js', 'app/styles.css', 'app/project.css', 'app/project.js', 'app/project-core.js', 'app/project-data.js', 'app/app.js', 'assets/dracoskill-mark.png', 'assets/icons/favicon-32.png']) {
   await access(path.join(root, asset));
 }
 assert.match(config, /https:\/\/draco-code-backend\.vercel\.app/);
-assert.match(html, /id="account-menu-button"/);
+assert.match(html, /id="menu-button"/);
+assert.match(html, /id="signin-button"/);
+assert.match(html, /id="menu-project"/);
+assert.match(html, /id="auth-dialog"/);
+assert.match(html, /id="project-ide"/);
+assert.doesNotMatch(html, /id="account-menu-button"/);
 assert.match(html, /id="account-panel"/);
 assert.match(app, /function canUseLanguage/);
 assert.match(app, /initAccount\(\)/);
+assert.match(app, /window\.DracoCore = /);
+assert.match(sw, /app\/project\.js/);
+assert.match(html, /app\/project\.js/);
 assert.match(app, /headers.Authorization/);
 assert.match(config, /http:\/\/localhost:8787/);
 const vercelConfig = JSON.parse(await readFile(path.join(root, 'vercel.json'), 'utf8'));
@@ -77,3 +87,10 @@ assert.match(app, /layout-toggle-button.*toggleLayout/s);
 assert.match(app, /localStorage\.setItem\(LAYOUT_STORAGE_KEY, selected\)/);
 assert.match(css, /\.main-column\[data-layout="split"\]/);
 assert.match(css, /\.main-column\[data-layout="stacked"\]/);
+
+const bar = html.slice(html.indexOf('<header class="topbar">'), html.indexOf('<div class="topbar-actions">'));
+assert.ok(bar.indexOf('id="menu-button"') < bar.indexOf('id="signin-button"') && bar.indexOf('id="signin-button"') < bar.indexOf('class="brand"'), 'top bar order must be menu, sign in, brand');
+assert.equal((html.match(/M4 6h16M4 12h16M4 18h16/g) || []).length, 1, 'only one hamburger icon');
+assert.match(html, /data-mode="project"/);
+for (const ver of [/Project mode/]) assert.match(html, ver);
+console.log('Project-mode shell checks passed.');

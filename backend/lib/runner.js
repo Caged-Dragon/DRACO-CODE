@@ -10,6 +10,7 @@
 // image, and any missing toolchain is reported clearly instead of crashing.
 import { Sandbox } from '@vercel/sandbox';
 import { findSnapshotId } from './toolchain.js';
+import { validateProject, isSource, extOf, HEADER_EXT, javaMainClass } from './project.js';
 
 export const RUN_LANGUAGES = ['python', 'javascript', 'java', 'c', 'cpp'];
 export const LABELS = { python: 'Python', javascript: 'JavaScript', java: 'Java', c: 'C', cpp: 'C++' };
@@ -201,6 +202,82 @@ export async function execute(language, code, stdin = '', factory = getFactory()
     if (missingTool(r)) return [{ error: missingMessage(language) }, 503];
     r.compile = c ? { stdout: c.stdout, stderr: c.stderr, exitCode: c.exitCode, timeMs: c.timeMs } : null;
     r.compileError = false;
+    return [r, 200];
+  } catch (e) {
+    if (isCapacityError(e)) return [{ error: CAPACITY_MESSAGE, code: 'capacity' }, 503];
+    return [{ error: `The sandbox service failed: ${e?.message || e}` }, 502];
+  } finally {
+    await s.close();
+  }
+}
+
+
+// Multi-file project run (Project mode). Files live in ROOT/proj so user file names can never
+// collide with the runner's own scripts (run.sh, app, build/, ...). Paths were validated by
+// validateProject(), and source lists are passed through @argfiles, never interpolated into shell.
+export class ProjectSession extends RunSession {
+  constructor(language, project, factory = getFactory(), packages = []) {
+    super(language, '', factory, packages);
+    this.project = project;
+    this.entry = project.entry;
+    this.cls = language === 'java' ? javaMainClass(project.entry, project.files.find((f) => f.path === project.entry).content) : undefined;
+  }
+  async open() {
+    this.sb = await this.factory();
+    const sources = this.project.files.filter((f) => isSource(this.language, f.path)).map((f) => f.path);
+    const files = this.project.files.map((f) => ({ path: `${ROOT}/proj/${f.path}`, content: Buffer.from(f.content, 'utf8') }));
+    files.push({ path: `${ROOT}/sources.txt`, content: Buffer.from(sources.join('\n') + '\n', 'utf8') });
+    await this.sb.writeFiles(files);
+    await this.installPackages();
+  }
+  async prepare() {
+    const l = this.language, names = this.packages.map((p) => p.name);
+    const head = 'ROOTDIR="$PWD"\ncd proj || exit 1\n';
+    if (l === 'java') {
+      if (!/^[A-Za-z_]\w*(\.[A-Za-z_]\w*)*$/.test(this.cls)) return { error: 'Invalid Java class name.' };
+      return this.phase('compile', `${head}mkdir -p "$ROOTDIR/build" && javac -nowarn -encoding UTF-8 -J-Xmx256m -J-XX:+UseSerialGC -cp "$ROOTDIR/.draco-java/*" -d "$ROOTDIR/build" @"$ROOTDIR/sources.txt"`, { timeoutSec: COMPILE_TIMEOUT });
+    }
+    if (l === 'c' || l === 'cpp') {
+      const dirs = [...new Set(this.project.files.filter((f) => HEADER_EXT.includes(extOf(f.path))).map((f) => f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '.'))];
+      const inc = ['.', ...dirs.filter((d) => d !== '.')].map((d) => `-I${d}`).join(' ');
+      const flags = [];
+      if (l === 'c') { if (names.includes('libsqlite3-dev')) flags.push('-lsqlite3'); if (names.includes('libssl-dev')) flags.push('-lssl', '-lcrypto'); if (names.includes('libcurl4-openssl-dev')) flags.push('-lcurl'); }
+      else { if (names.includes('libfmt-dev')) flags.push('-lfmt'); if (names.includes('libeigen3-dev')) flags.push('-I/usr/include/eigen3'); }
+      const cc = l === 'c' ? 'gcc -std=gnu17' : 'g++ -std=gnu++17';
+      return this.phase('compile', `${head}${cc} -O1 -Wall -pipe ${inc} -o "$ROOTDIR/app" @"$ROOTDIR/sources.txt" -lm -lpthread ${flags.join(' ')}`, { timeoutSec: COMPILE_TIMEOUT });
+    }
+    return null;
+  }
+  runCommandText() {
+    const head = 'ROOTDIR="$PWD"\ncd proj || exit 1\n';
+    const e = this.entry;
+    switch (this.language) {
+      case 'python': return `${head}PYTHONPATH="$PWD:$ROOTDIR/.draco-python:\${PYTHONPATH:-}" python3 "${e}"`;
+      case 'javascript': return `${head}NODE_PATH="$PWD:$ROOTDIR/.draco-node/node_modules:\${NODE_PATH:-}" node "${e}"`;
+      case 'java': return `${head}java ${JAVA_FLAGS} -cp "$ROOTDIR/build:$ROOTDIR/.draco-java/*" ${this.cls}`;
+      default: return `${head}"$ROOTDIR/app"`;
+    }
+  }
+}
+
+// Whole project. Returns [result, httpStatus].
+export async function executeProject(language, files, entry, stdin = '', factory = getFactory(), options = {}) {
+  const v = validateProject(language, files, entry);
+  if (v.error) return [{ error: v.error }, 400];
+  if ((stdin || '').length > MAX_STDIN) return [{ error: 'Input is too large (100 KB max).' }, 413];
+  const s = new ProjectSession(language, v, factory, Array.isArray(options.packages) ? options.packages : []);
+  try {
+    await s.open();
+    const c = await s.prepare();
+    if (c && c.error) return [{ error: c.error }, 400];
+    if (c && c.exitCode !== 0) {
+      if (missingTool(c)) return [{ error: missingMessage(language) }, 503];
+      return [compileFailure(c), 200];
+    }
+    const r = await s.run(stdin);
+    if (missingTool(r)) return [{ error: missingMessage(language) }, 503];
+    r.compile = c ? { stdout: c.stdout, stderr: c.stderr, exitCode: c.exitCode, timeMs: c.timeMs } : null;
+    r.compileError = false; r.entry = entry;
     return [r, 200];
   } catch (e) {
     if (isCapacityError(e)) return [{ error: CAPACITY_MESSAGE, code: 'capacity' }, 503];

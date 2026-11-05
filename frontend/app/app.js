@@ -11,6 +11,9 @@
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } })
     : null;
   let accountSession = null, accountUser = null, installedLanguages = new Set(), installedPackages = [], accountBusy = false;
+  let authMode = 'signin', pendingMode = null, accountReady = false;
+  const MODE_KEY = 'draco-code-mode-v1';
+  const sessionListeners = [];
   const LANGUAGES = {
     python: { label: 'Python', extension: '.py', file: 'main.py', dot: 'python', starter: 'def main():\n    print("Hello from Draco Code")\n\nif __name__ == "__main__":\n    main()\n' },
     javascript: { label: 'JavaScript', extension: '.js', file: 'main.js', dot: 'javascript', starter: 'function main() {\n  console.log("Hello from Draco Code");\n}\n\nmain();\n' },
@@ -285,6 +288,7 @@
   }
 
   async function runCode() {
+    if (getMode() === 'project') { window.DracoProject?.run(); return; }
     if (isRunning) return;
     if (!navigator.onLine) {
       clearConsole(false);
@@ -491,8 +495,8 @@
   };
   const LABELS = { python:'Python', javascript:'JavaScript', java:'Java', c:'C', cpp:'C++' };
   function canUseLanguage(language) { return language === 'python' || language === 'javascript' || installedLanguages.has(language); }
-  function openAccountPanel() { $('account-panel').classList.add('open');$('account-panel').setAttribute('aria-hidden','false');$('account-panel-scrim').hidden=false;$('account-menu-button').setAttribute('aria-expanded','true');renderPackageControls(); }
-  function closeAccountPanel() { $('account-panel').classList.remove('open');$('account-panel').setAttribute('aria-hidden','true');$('account-panel-scrim').hidden=true;$('account-menu-button').setAttribute('aria-expanded','false'); }
+  function openAccountPanel() { $('account-panel').classList.add('open');$('account-panel').setAttribute('aria-hidden','false');$('account-panel-scrim').hidden=false;closeMenu();renderPackageControls(); }
+  function closeAccountPanel() { $('account-panel').classList.remove('open');$('account-panel').setAttribute('aria-hidden','true');$('account-panel-scrim').hidden=true; }
   function updateLanguageAccess() {
     [...languageSelect.options].forEach(option=>{option.disabled=!canUseLanguage(option.value);option.textContent=LABELS[option.value]+(option.disabled?' · Sign in to unlock':'');});
     if(activeProgram&&!canUseLanguage(activeProgram.language)){const fallback=state.programs.find(p=>canUseLanguage(p.language));if(fallback)setActive(fallback.id);}
@@ -554,10 +558,9 @@
   }
 
   function setAuthBusy(busy) {
-    $('account-signin').disabled = busy;
-    $('account-signup').disabled = busy;
-    $('account-signin').textContent = busy ? 'Please wait…' : 'Sign in';
-    $('account-signup').textContent = busy ? 'Please wait…' : 'Create account';
+    const button = $('auth-submit');
+    button.disabled = busy;
+    button.textContent = busy ? 'Please wait…' : (authMode === 'signup' ? 'Create account' : 'Sign in');
   }
 
   function authErrorText(error, fallback) {
@@ -598,7 +601,9 @@
       accountSession = data.session;
       accountUser = data.user;
       await applyAccountSession();
+      closeAuth();
       showToast('Signed in successfully.');
+      resumePending();
     } catch (error) {
       setAuthMessage(authErrorText(error, 'Could not sign in. Please try again.'), 'error');
     } finally {
@@ -651,7 +656,9 @@
       accountSession = data.session;
       accountUser = data.user || data.session.user;
       await applyAccountSession();
+      closeAuth();
       showToast('Your account is ready. You are signed in.');
+      resumePending();
     } catch (error) {
       setAuthMessage(authErrorText(error, 'Could not create your account. Please try again.'), 'error');
     } finally {
@@ -681,14 +688,35 @@
       installedPackages = [];
     }
     updateLanguageAccess();
+    updateAccountChrome();
+    sessionListeners.forEach((listener) => { try { listener(accountUser, accountSession); } catch (error) { console.error(error); } });
   }
 
   async function initAccount() {
-    $('account-menu-button').addEventListener('click', openAccountPanel);
+    $('menu-button').addEventListener('click', openMenu);
+    $('menu-close').addEventListener('click', closeMenu);
+    $('menu-scrim').addEventListener('click', closeMenu);
+    $('menu-compiler').addEventListener('click', () => { closeMenu(); setMode('compiler'); });
+    $('menu-project').addEventListener('click', () => { closeMenu(); setMode('project'); });
+    $('menu-packages').addEventListener('click', openAccountPanel);
+    $('signin-button').addEventListener('click', () => { if (accountUser) openAccountPanel(); else openAuth('signin'); });
+    $('account-open-auth').addEventListener('click', () => { closeAccountPanel(); openAuth('signin'); });
     $('account-panel-close').addEventListener('click', closeAccountPanel);
     $('account-panel-scrim').addEventListener('click', closeAccountPanel);
-    $('account-signin').addEventListener('click', handleSignIn);
-    $('account-signup').addEventListener('click', handleSignUp);
+    $('auth-close').addEventListener('click', closeAuth);
+    $('auth-scrim').addEventListener('click', closeAuth);
+    $('auth-tab-signin').addEventListener('click', () => setAuthMode('signin'));
+    $('auth-tab-signup').addEventListener('click', () => setAuthMode('signup'));
+    $('auth-pw-toggle').addEventListener('click', () => {
+      const input = $('account-password'), show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      $('auth-pw-toggle').textContent = show ? 'Hide' : 'Show';
+      $('auth-pw-toggle').setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+    });
+    $('auth-form').addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (authMode === 'signup') handleSignUp(); else handleSignIn();
+    });
     $('account-signout').addEventListener('click', async () => {
       if (!supabaseClient || accountBusy) return;
       accountBusy = true;
@@ -712,17 +740,11 @@
     document.querySelectorAll('[data-add-language]').forEach(button => {
       button.addEventListener('click', () => addLanguage(button.dataset.addLanguage));
     });
-    $('account-password').addEventListener('keydown', event => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        handleSignIn();
-      }
-    });
-
     if (!supabaseClient) {
       setAuthMessage('Account sign-in could not initialize. Check the Supabase public URL/key settings and reload.', 'error');
-      $('account-signin').disabled = true;
-      $('account-signup').disabled = true;
+      $('auth-submit').disabled = true;
+      accountReady = true;
+      finishRestore();
       return;
     }
 
@@ -743,7 +765,115 @@
     accountSession = data?.session || null;
     accountUser = accountSession?.user || null;
     await applyAccountSession();
+    accountReady = true;
+    finishRestore();
   }
+
+  const AVATAR_SVG = $('signin-avatar').innerHTML;
+  function updateAccountChrome() {
+    const button = $('signin-button'), avatar = $('signin-avatar'), label = $('signin-label');
+    if (accountUser) {
+      const email = accountUser.email || 'Account';
+      label.textContent = email.split('@')[0];
+      avatar.textContent = email.slice(0, 1).toUpperCase();
+      avatar.classList.add('has-initial');
+      button.classList.add('signed-in');
+      button.title = 'Account, languages and packages';
+      button.setAttribute('aria-label', `Account ${email}. Open account panel`);
+      $('menu-foot').textContent = `Signed in as ${email}`;
+      $('menu-project-badge').hidden = true;
+    } else {
+      label.textContent = 'Sign in';
+      avatar.innerHTML = AVATAR_SVG;
+      avatar.classList.remove('has-initial');
+      button.classList.remove('signed-in');
+      button.title = 'Sign in or create an account';
+      button.setAttribute('aria-label', 'Sign in');
+      $('menu-foot').textContent = 'Guest. Python and JavaScript are available without an account.';
+      $('menu-project-badge').hidden = false;
+    }
+  }
+
+  function setAuthMode(mode) {
+    authMode = mode === 'signup' ? 'signup' : 'signin';
+    const signup = authMode === 'signup';
+    $('auth-tab-signin').setAttribute('aria-selected', String(!signup));
+    $('auth-tab-signup').setAttribute('aria-selected', String(signup));
+    $('auth-title').textContent = signup ? 'Create your Draco account' : 'Sign in to Draco Code';
+    $('account-password').autocomplete = signup ? 'new-password' : 'current-password';
+    $('auth-submit').textContent = signup ? 'Create account' : 'Sign in';
+    setAuthMessage('');
+  }
+  let authReturnFocus = null;
+  function openAuth(mode = 'signin', reason) {
+    closeMenu();
+    closeAccountPanel();
+    authReturnFocus = document.activeElement;
+    setAuthMode(mode);
+    $('auth-sub').textContent = reason || 'Use your account to unlock more languages and keep projects.';
+    $('auth-scrim').hidden = false;
+    $('auth-dialog').hidden = false;
+    setTimeout(() => $('account-email').focus(), 30);
+  }
+  function closeAuth() {
+    $('auth-scrim').hidden = true;
+    $('auth-dialog').hidden = true;
+    pendingMode = pendingMode && accountUser ? pendingMode : null;
+    if (authReturnFocus?.focus) authReturnFocus.focus();
+  }
+  function openMenu() {
+    $('menu-drawer').classList.add('open');
+    $('menu-drawer').setAttribute('aria-hidden', 'false');
+    $('menu-scrim').hidden = false;
+    $('menu-button').setAttribute('aria-expanded', 'true');
+    $('menu-compiler').focus();
+  }
+  function closeMenu() {
+    $('menu-drawer').classList.remove('open');
+    $('menu-drawer').setAttribute('aria-hidden', 'true');
+    $('menu-scrim').hidden = true;
+    $('menu-button').setAttribute('aria-expanded', 'false');
+  }
+
+  function getMode() { return document.body.dataset.mode || 'compiler'; }
+  function setMode(mode, options = {}) {
+    if (mode === 'project' && !accountUser && !options.restoring) {
+      pendingMode = 'project';
+      openAuth('signin', 'Project mode keeps your multi-file projects in your account. Sign in or create one to continue.');
+      return;
+    }
+    const next = mode === 'project' ? 'project' : 'compiler';
+    document.body.dataset.mode = next;
+    $('workspace').hidden = next === 'project';
+    $('project-ide').hidden = next !== 'project';
+    $('menu-compiler').classList.toggle('active', next === 'compiler');
+    $('menu-project').classList.toggle('active', next === 'project');
+    if (!options.restoring) { try { localStorage.setItem(MODE_KEY, next); } catch { /* optional */ } }
+    document.dispatchEvent(new CustomEvent('draco:mode', { detail: { mode: next } }));
+  }
+  function resumePending() {
+    if (pendingMode === 'project' && accountUser) { pendingMode = null; setMode('project'); }
+  }
+  // A saved "project" mode is shown immediately, then confirmed (or dropped) once the session is known.
+  function finishRestore() {
+    if (getMode() === 'project' && !accountUser) setMode('compiler', { restoring: true });
+  }
+
+  window.DracoCore = Object.freeze({
+    client: supabaseClient,
+    backendUrl: BACKEND_URL,
+    user: () => accountUser,
+    session: () => accountSession,
+    ready: () => accountReady,
+    canUseLanguage,
+    toast: showToast,
+    openAuth,
+    openAccountPanel,
+    getMode,
+    setMode,
+    onSession: (listener) => { sessionListeners.push(listener); },
+    setConnection: updateConnection
+  });
 
   function registerServiceWorker() {
     if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
@@ -837,11 +967,17 @@
   });
 
   document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      if (!$('auth-dialog').hidden) closeAuth();
+      else if ($('menu-drawer').classList.contains('open')) closeMenu();
+      else if ($('account-panel').classList.contains('open')) closeAccountPanel();
+    }
     if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
       event.preventDefault();
       runCode();
     } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
       event.preventDefault();
+      if (getMode() === 'project') { window.DracoProject?.save(); return; }
       if (activeProgram) activeProgram.code = editor.value;
       persist();
       showToast('Program saved on this device.');
@@ -864,7 +1000,8 @@
     }
   });
 
-  initAccount().catch(e => console.error('Draco account initialization failed', e));
+  try { if (localStorage.getItem(MODE_KEY) === 'project' && supabaseClient) setMode('project', { restoring: true }); } catch { /* compiler mode */ }
+  initAccount().catch(e => { console.error('Draco account initialization failed', e); accountReady = true; finishRestore(); });
   checkBackend();
   registerServiceWorker();
 })();

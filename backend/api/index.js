@@ -2,7 +2,7 @@
 // Routes: GET /health, GET /sandboxes, GET /setup, GET /setup/status,
 //        POST /setup/start, GET /selfcheck, POST /execute.
 import { createHmac, randomUUID } from 'node:crypto';
-import { execute } from '../lib/runner.js';
+import { execute, executeProject } from '../lib/runner.js';
 import { describe } from '../lib/status.js';
 import { setupPage, startSetup, setupStatus } from '../lib/toolchain.js';
 import { selfCheck } from '../lib/selfcheck.js';
@@ -172,6 +172,7 @@ function validatedPackages(language,rows){
 }
 function safeRunMetrics(body, result, status) {
   const code = typeof body.code === 'string' ? body.code : '';
+  const projectBytes = Array.isArray(body.files) ? body.files.reduce((n, f) => n + Buffer.byteLength(typeof f?.content === 'string' ? f.content : '', 'utf8'), 0) : 0;
   const stdin = typeof body.stdin === 'string' ? body.stdin : '';
   const stdout = typeof result?.stdout === 'string' ? result.stdout : '';
   const stderr = typeof result?.stderr === 'string' ? result.stderr : '';
@@ -180,7 +181,7 @@ function safeRunMetrics(body, result, status) {
     p_exit_code: Number.isInteger(result?.exitCode) ? result.exitCode : null,
     p_timed_out: result?.timedOut === true,
     p_duration_ms: Math.max(0, Math.min(300_000, Math.round(Number(result?.timeMs) || 0))),
-    p_code_bytes: Buffer.byteLength(code, 'utf8'),
+    p_code_bytes: projectBytes || Buffer.byteLength(code, 'utf8'),
     p_stdin_bytes: Buffer.byteLength(stdin, 'utf8'),
     p_stdout_bytes: Buffer.byteLength(stdout, 'utf8'),
     p_stderr_bytes: Buffer.byteLength(stderr, 'utf8'),
@@ -234,10 +235,11 @@ export default async function handler(req, res) {
       const body = bodyObject(req);
       if (!body) return send(res, 400, { error: 'Invalid JSON body.' });
       if (Buffer.byteLength(JSON.stringify(body), 'utf8') > MAX_BODY_BYTES) return send(res, 413, { error: 'Request is too large.' });
-      if (typeof body.language !== 'string' || typeof body.code !== 'string' || (body.stdin !== undefined && typeof body.stdin !== 'string')) {
-        return send(res, 400, { error: 'Expected language, code and optional stdin as strings.' });
+      const isProject = body.files !== undefined;
+      if (typeof body.language !== 'string' || (body.stdin !== undefined && typeof body.stdin !== 'string') || (isProject ? (!Array.isArray(body.files) || typeof body.entry !== 'string') : typeof body.code !== 'string')) {
+        return send(res, 400, { error: isProject ? 'Expected language, files, entry and optional stdin.' : 'Expected language, code and optional stdin as strings.' });
       }
-      if (Buffer.byteLength(body.code, 'utf8') > 200_000 || Buffer.byteLength(body.stdin || '', 'utf8') > 100_000) {
+      if (Buffer.byteLength(body.stdin || '', 'utf8') > 100_000 || (!isProject && Buffer.byteLength(body.code, 'utf8') > 200_000)) {
         return send(res, 413, { error: 'Code or input exceeds the supported size limit.' });
       }
       if (!['python', 'javascript', 'java', 'c', 'cpp'].includes(body.language)) {
@@ -250,6 +252,7 @@ export default async function handler(req, res) {
 
       let userContext=null, packages=[];
       if(req.headers?.authorization){try{userContext=await authenticatedUser(req,config);}catch{return send(res,401,{error:'Your sign-in session is invalid. Please sign in again.'});}if(!userContext)return send(res,401,{error:'Sign in to use account features.'});}
+      if(isProject&&!userContext)return send(res,401,{error:'Sign in to run projects.'});
       if(!['python','javascript'].includes(body.language)){if(!userContext)return send(res,401,{error:'Sign in to unlock Java, C and C++.'});try{const rows=await userRows('draco_user_languages',userContext.user.id,userContext.token,config,'language');if(!rows.some(row=>row.language===body.language))return send(res,403,{error:'Add this language to your account before running it.'});}catch{return send(res,503,{error:'Could not verify your installed languages. Please retry.'});}}
       if(userContext){try{const rows=await userRows('draco_user_packages',userContext.user.id,userContext.token,config,'language,package_name,package_version');packages=validatedPackages(body.language,rows.filter(row=>row.language===body.language));}catch{return send(res,503,{error:'Could not load your package list. Please retry.'});}}
       const requestId = randomUUID();
@@ -281,7 +284,9 @@ export default async function handler(req, res) {
         return send(res, 429, { error: 'Too many runs. Please wait a minute.' });
       }
 
-      const [result, status] = await execute(body.language, body.code, body.stdin || '', undefined, {packages});
+      const [result, status] = isProject
+        ? await executeProject(body.language, body.files, body.entry, body.stdin || '', undefined, {packages})
+        : await execute(body.language, body.code, body.stdin || '', undefined, {packages});
       res.setHeader('X-Request-Id', requestId);
       if (config) {
         const metrics = safeRunMetrics(body, result, status);

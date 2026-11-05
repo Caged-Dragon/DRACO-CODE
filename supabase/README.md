@@ -66,3 +66,7 @@ needed.
 
 Email/password sign-in is enabled in Supabase Auth by default for hosted projects; keep
 email confirmation enabled unless the product owner deliberately chooses auto-confirm.
+
+## Project mode tables (added)
+
+`draco_projects` and `draco_project_files` (+ `draco_rename_path`, `draco_delete_path`) are created by `migrations/20261105090000_draco_projects.sql`. RLS limits every row to its owner; `anon` has no access. Limits enforced in the database: 25 projects per user, 100 entries and 300 KB per project, 100 KB per file. Source code of projects is stored here by design (unlike one-off runs, which are never stored).
