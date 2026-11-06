@@ -83,6 +83,7 @@
   function safeSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* optional */ } }
 
   function clearProject() {
+    if (term.isRunning()) term.stop();
     S.tabs.forEach(function (t) { t.host.remove(); }); S.tabs = []; S.active = null; S.project = null; S.files = new Map();
     S.expanded = new Set(); S.selected = null; S.problems = []; S.creating = null; S.renaming = null;
   }
@@ -271,9 +272,29 @@
     } catch (e) { toast(e.message); }
   }
 
-  // ---------- running ----------
+  // ---------- running (live terminal) ----------
+  var term = window.DracoTerminal.create($('panel-output'), {
+    onStatus: function (kind, label) {
+      if (kind === 'running') { S.running = true; renderRunState(label === 'Running' ? 'Running' : label); }
+      $('panel-stop').hidden = !(kind === 'running' && label === 'Running');
+    },
+    onFinish: function (info) {
+      S.running = false; $('panel-stop').hidden = true;
+      var files = rowsList().filter(function (x) { return !x.is_folder; }).map(function (x) { return x.path; });
+      S.problems = S.project ? core.parseDiagnostics(S.project.language, info.text || '', files) : [];
+      renderProblems();
+      var secs = info.durationMs ? (info.durationMs / 1000).toFixed(info.durationMs < 10000 ? 2 : 1) + ' s' : '';
+      $('ide-run-meta').textContent = secs + (typeof info.exitCode === 'number' ? ' · exit ' + info.exitCode : '');
+      var label = info.stopped ? 'Stopped' : info.compileError ? 'Compile error' : info.timedOut ? 'Timed out' : info.kind === 'error' ? 'Error' : 'Success';
+      renderRunState(label, info.kind === 'success' ? 'ok' : info.kind === 'warning' ? 'warn' : 'bad');
+      if (S.problems.length && info.kind !== 'success') showPanel('problems');
+    }
+  });
+  function runCommand(lang, entry) {
+    var stem = core.baseName(entry).replace(/\.[^.]+$/, '');
+    return { python: 'python3 ' + entry, javascript: 'node ' + entry, java: 'javac -d build $(find . -name "*.java") && java ' + stem, c: 'gcc *.c -o app && ./app', cpp: 'g++ *.cpp -o app && ./app' }[lang];
+  }
   async function run() {
-    if (S.running) return;
     if (!S.project) { toast('Create or open a project first.'); return; }
     var lang = S.project.language, entry = S.project.entry_path;
     if (!App.canUseLanguage(lang)) { App.openAccountPanel(); toast('Add ' + core.LABELS[lang] + ' to your account to run this project.'); return; }
@@ -281,17 +302,27 @@
     if (!(await flushSaves())) { toast('Save failed, so the run was cancelled. Check your connection.'); return; }
     var files = rowsList().filter(function (r) { return !r.is_folder; }).map(function (r) { return { path: r.path, content: r.content }; });
     var session = App.session(); if (!session || !session.access_token) { App.openAuth('signin', 'Your session ended. Sign in to run projects.'); return; }
-    S.running = true; renderRunState('Running'); showPanel('output');
+    S.problems = []; renderProblems(); showPanel('output'); $('ide-run-meta').textContent = '';
+    await term.run({
+      backendUrl: App.backendUrl,
+      headers: { Authorization: 'Bearer ' + session.access_token },
+      body: { language: lang, files: files, entry: entry, stdin: $('ide-stdin').value },
+      command: runCommand(lang, entry),
+      fallback: function () { return legacyRun(lang, entry, files, session.access_token); }
+    });
+  }
+
+  // One-shot run, used only when the backend does not offer terminal sessions yet.
+  async function legacyRun(lang, entry, files, token) {
+    S.running = true; renderRunState('Running'); $('panel-output').classList.remove('term-host');
     var out = $('panel-output'); out.replaceChildren(el('div', 'ide-empty', 'Running ' + entry + ' in an isolated sandbox…'));
-    S.problems = []; renderProblems();
     var t0 = performance.now();
     try {
       var res = await fetch(App.backendUrl + '/execute', { method: 'POST', cache: 'no-store', signal: AbortSignal.timeout(58000),
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token },
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify({ language: lang, files: files, entry: entry, stdin: $('ide-stdin').value }) });
       var data = await res.json().catch(function () { return {}; });
-      if (!res.ok && data.error) { renderRunError(data.error, res.status); }
-      else renderResult(data, res.status, Math.round(performance.now() - t0));
+      if (!res.ok && data.error) renderRunError(data.error, res.status); else renderResult(data, res.status, Math.round(performance.now() - t0));
     } catch (e) {
       renderRunError(e && e.name === 'TimeoutError' ? 'The run took too long. The server may be starting up; try again.' : 'Could not reach the compiler backend. Your files are saved.', 0);
     } finally { S.running = false; renderRunState(); }
@@ -445,7 +476,7 @@
   }
   function renderRunState(label, kind) {
     var st = $('ide-st-run'); st.textContent = S.running ? 'Running…' : (label || 'Idle'); st.className = 'ide-st-run ' + (S.running ? 'busy' : (kind || ''));
-    $('ide-main').classList.toggle('is-running', S.running); $('ide-run').disabled = S.running; $('act-run').disabled = S.running; $('run-label').textContent = S.running ? 'Running' : 'Run';
+    $('ide-main').classList.toggle('is-running', S.running); $('run-label').textContent = S.running ? 'Restart' : 'Run';
   }
   function renderProblems() {
     var host = $('panel-problems'), n = S.problems.length, count = $('problems-count'); host.replaceChildren();
@@ -463,7 +494,7 @@
   function showPanel(name) {
     S.panel = name; document.querySelectorAll('.ide-panel-tabs button').forEach(function (b) { var on = b.dataset.panel === name; b.classList.toggle('active', on); b.setAttribute('aria-selected', String(on)); });
     ['output', 'problems', 'input'].forEach(function (k) { $('panel-' + k).hidden = k !== name; });
-    $('ide-panel').classList.remove('collapsed');
+    $('ide-panel').classList.remove('collapsed'); if (name === 'output') term.focus();
   }
   function showSide(view, keepState) {
     S.side = view; $('view-explorer').hidden = view !== 'explorer'; $('view-projects').hidden = view !== 'projects';
@@ -490,6 +521,7 @@
   function init() {
     $('act-explorer').addEventListener('click', function () { toggleSide('explorer'); });
     $('act-projects').addEventListener('click', function () { toggleSide('projects'); });
+    $('panel-stop').addEventListener('click', function () { term.stop(); });
     $('act-run').addEventListener('click', run); $('ide-run').addEventListener('click', run);
     $('act-packages').addEventListener('click', App.openAccountPanel);
     $('ide-save').addEventListener('click', function () { api.save(true); });
@@ -501,7 +533,7 @@
     $('ide-project-title').addEventListener('click', function () { showSide('projects'); });
     document.querySelectorAll('.ide-panel-tabs button').forEach(function (b) { b.addEventListener('click', function () { showPanel(b.dataset.panel); }); });
     $('panel-clear').addEventListener('click', function () {
-      if (S.panel === 'input') $('ide-stdin').value = ''; else { $('panel-output').replaceChildren(el('div', 'ide-empty', 'Run the project to see its output here.')); S.problems = []; renderProblems(); $('ide-run-meta').textContent = ''; }
+      if (S.panel === 'input') $('ide-stdin').value = ''; else if (term.isRunning()) term.clear(); else { term.reset(el('div', 'ide-empty', 'Run the project to start it in this terminal. When it asks for input, type right here.')); S.problems = []; renderProblems(); $('ide-run-meta').textContent = ''; }
     });
     $('panel-toggle').addEventListener('click', function () { $('ide-panel').classList.toggle('collapsed'); });
     $('ide-tree').addEventListener('keydown', function (e) {

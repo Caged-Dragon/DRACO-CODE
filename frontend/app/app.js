@@ -241,8 +241,27 @@
     if (text) text.textContent = label;
   }
 
+  const COMMANDS = { python: 'python3 main.py', javascript: 'node main.js', java: 'javac Main.java && java Main', c: 'gcc main.c -o app && ./app', cpp: 'g++ main.cpp -o app && ./app' };
+  const terminal = window.DracoTerminal.create(output, {
+    onStatus: (kind, label) => {
+      const running = kind === 'running';
+      setResultState(kind === 'warning' || kind === 'error' || kind === 'success' || running ? kind : '', label);
+      $('console-subtitle').textContent = running ? (label === 'Running' ? 'Running. Type below when it asks for input.' : label) : label;
+      $('stop-button').hidden = !running || label !== 'Running';
+    },
+    onFinish: (info) => {
+      isRunning = false;
+      runLabel.textContent = 'Run';
+      $('stop-button').hidden = true;
+      $('execution-time').textContent = info.durationMs ? `${(info.durationMs / 1000).toFixed(info.durationMs < 10000 ? 2 : 1)} s` : '';
+      if (info.unreachable) updateConnection('offline', 'Unavailable', 'Backend: request failed');
+    }
+  });
+
   function clearConsole(updateStatus = true) {
     lastResult = null;
+    if (terminal.isRunning()) terminal.stop();
+    output.classList.remove('term-host');
     output.replaceChildren();
     const empty = document.createElement('div');
     empty.className = 'empty-output';
@@ -251,9 +270,9 @@
     mark.textContent = '›';
     const copy = document.createElement('div');
     const strong = document.createElement('strong');
-    strong.textContent = 'Output will appear here';
+    strong.textContent = 'Your terminal is ready';
     const p = document.createElement('p');
-    p.textContent = 'Run your program to see standard output, errors and execution time.';
+    p.textContent = 'Press Run. The program starts here, and when it asks for input you can type right in this window.';
     copy.append(strong, p);
     empty.append(mark, copy);
     output.append(empty);
@@ -289,7 +308,6 @@
 
   async function runCode() {
     if (getMode() === 'project') { window.DracoProject?.run(); return; }
-    if (isRunning) return;
     if (!navigator.onLine) {
       clearConsole(false);
       showError('You are offline. Your edits are saved locally; reconnect to run code.');
@@ -306,11 +324,28 @@
       showError('Add some code before running this program.');
       return;
     }
+    const headers = {};
+    if (accountSession?.access_token) headers.Authorization = `Bearer ${accountSession.access_token}`;
     isRunning = true;
+    runLabel.textContent = 'Restart';
+    $('execution-time').textContent = '';
+    $('stop-button').hidden = true;
+    await terminal.run({
+      backendUrl: BACKEND_URL,
+      headers,
+      body: { language, code, stdin },
+      command: COMMANDS[language],
+      // Backends that predate terminal sessions: fall back to a one-shot run so nothing breaks mid-deploy.
+      fallback: () => legacyRun(language, code, stdin, headers)
+    });
+  }
+
+  // One-shot run (no live terminal): used only when the backend does not offer terminal sessions yet.
+  async function legacyRun(language, code, stdin, authHeaders) {
+    output.classList.remove('term-host');
     runButton.disabled = true;
     runLabel.textContent = 'Running';
     $('console-subtitle').textContent = language === 'java' || language === 'c' || language === 'cpp' ? 'Compiling and running…' : 'Running…';
-    $('execution-time').textContent = '';
     setResultState('running', 'Running');
     output.replaceChildren();
     const progress = document.createElement('div');
@@ -318,11 +353,9 @@
     progress.textContent = 'Your program is running in an isolated sandbox…';
     output.append(progress);
     try {
-      const headers = { 'Content-Type': 'application/json' };
-      if (accountSession?.access_token) headers.Authorization = `Bearer ${accountSession.access_token}`;
       const response = await fetch(`${BACKEND_URL}/execute`, {
         method: 'POST',
-        headers,
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ language, code, stdin }),
         cache: 'no-store',
         signal: AbortSignal.timeout(52_000)
@@ -884,9 +917,9 @@
 
   function loadSavedLayout() {
     try {
-      return localStorage.getItem(LAYOUT_STORAGE_KEY) === 'stacked' ? 'stacked' : 'split';
+      return localStorage.getItem(LAYOUT_STORAGE_KEY) === 'split' ? 'split' : 'stacked';
     } catch {
-      return 'split';
+      return 'stacked';
     }
   }
 
@@ -912,7 +945,7 @@
   }
 
   function toggleLayout() {
-    const current = document.querySelector('.main-column')?.dataset.layout || 'split';
+    const current = document.querySelector('.main-column')?.dataset.layout || 'stacked';
     setLayout(current === 'split' ? 'stacked' : 'split');
   }
 
@@ -951,7 +984,8 @@
       editor.focus();
     }
   });
-  $('clear-output-button').addEventListener('click', () => clearConsole());
+  $('clear-output-button').addEventListener('click', () => { if (terminal.isRunning()) terminal.clear(); else clearConsole(); });
+  $('stop-button').addEventListener('click', () => terminal.stop());
   $('toggle-input-button').addEventListener('click', () => {
     const button = $('toggle-input-button');
     const wrap = $('stdin-wrap');

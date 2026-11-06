@@ -166,3 +166,7 @@
   .ide-tab-dir { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .menu-drawer, .account-panel { transition: none; } }
+.ide-panel-actions .ide-stop { color: var(--err); }
+.ide-panel-actions .ide-stop svg { fill: currentColor; stroke: none; }
+.ide-panel-actions .ide-stop[hidden] { display: none; }
+.ide-panel-body.term-host { overflow: auto; }

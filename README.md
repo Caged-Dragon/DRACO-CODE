@@ -73,3 +73,13 @@ For local frontend builds, export those three variables before running `node scr
 - Data lives in `public.draco_projects` and `public.draco_project_files` with row-level security (`supabase/migrations/20261105090000_draco_projects.sql`). **Apply this migration once** (Supabase Dashboard → SQL Editor → paste → Run, or `supabase db push`). It is additive and safe to run twice.
 - The backend `POST /execute` also accepts `{ language, files:[{path,content}], entry, stdin }` for project runs. This requires a signed-in user and the same per-language account checks as single-file runs.
 - Not included on purpose: an interactive terminal. Each run is a fresh, network-isolated sandbox, so there is no persistent shell.
+
+
+## Interactive terminal (update)
+
+The console is now a real terminal. The program keeps running in its sandbox while you type: prompts from `input()`, `scanf`, `cin`, `Scanner` and `readline` appear immediately, and your answers go straight into the running program. Ctrl+C stops it, Ctrl+D ends input, Ctrl+L clears, Up/Down recall earlier lines. Stacked view (editor on top, terminal below) is the default.
+
+- Backend: `POST /session/start | /session/poll | /session/input | /session/eof | /session/stop` (`backend/lib/interactive.js`). `start` applies the same sign-in, language and run-quota rules as `/execute`; the other calls are authorised by an HMAC-signed, expiring session token. One program lives at most `DRACO_SESSION_SECONDS` (default 120) and 100 KB of output.
+- Frontend: `frontend/app/terminal.js`, used by the compiler page and by Project mode. If the backend has no `/session/*` routes yet (frontend deployed first), the page falls back to the old one-shot `/execute` run automatically.
+- Optional environment variable: `DRACO_SESSION_SECONDS` (backend). No new secrets are needed; tokens are signed with `CODE_RATE_LIMIT_SECRET`.
+- Not a full terminal emulator: programs that draw full-screen UIs (curses, vim) are not supported. Colour codes are stripped.

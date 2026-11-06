@@ -3,6 +3,7 @@
 //        POST /setup/start, GET /selfcheck, POST /execute.
 import { createHmac, randomUUID } from 'node:crypto';
 import { execute, executeProject } from '../lib/runner.js';
+import { startSession, pollSession, sendInput, sendEof, stopSession } from '../lib/interactive.js';
 import { describe } from '../lib/status.js';
 import { setupPage, startSetup, setupStatus } from '../lib/toolchain.js';
 import { selfCheck } from '../lib/selfcheck.js';
@@ -189,6 +190,65 @@ function safeRunMetrics(body, result, status) {
   };
 }
 
+// Shared by /execute and /session/start: body checks, sign-in, language gating, packages and the run quota.
+// Sends the error response itself and returns null when the run is not allowed.
+async function admitRun(req, res) {
+  const contentLength = Number(req.headers?.['content-length'] || 0);
+  if (contentLength > MAX_BODY_BYTES) return send(res, 413, { error: 'Request is too large.' });
+  const body = bodyObject(req);
+  if (!body) return send(res, 400, { error: 'Invalid JSON body.' });
+  if (Buffer.byteLength(JSON.stringify(body), 'utf8') > MAX_BODY_BYTES) return send(res, 413, { error: 'Request is too large.' });
+  const isProject = body.files !== undefined;
+  if (typeof body.language !== 'string' || (body.stdin !== undefined && typeof body.stdin !== 'string') || (isProject ? (!Array.isArray(body.files) || typeof body.entry !== 'string') : typeof body.code !== 'string')) {
+    return send(res, 400, { error: isProject ? 'Expected language, files, entry and optional stdin.' : 'Expected language, code and optional stdin as strings.' });
+  }
+  if (Buffer.byteLength(body.stdin || '', 'utf8') > 100_000 || (!isProject && Buffer.byteLength(body.code, 'utf8') > 200_000)) {
+    return send(res, 413, { error: 'Code or input exceeds the supported size limit.' });
+  }
+  if (!['python', 'javascript', 'java', 'c', 'cpp'].includes(body.language)) {
+    return send(res, 400, { error: 'Unsupported language. Choose Python, JavaScript, Java, C or C++.' });
+  }
+
+  const config = supabaseConfig();
+  const production = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
+  if (!config && production) return send(res, 503, { error: 'Execution service is not configured. Please contact the site operator.' });
+
+  let userContext=null, packages=[];
+  if(req.headers?.authorization){try{userContext=await authenticatedUser(req,config);}catch{return send(res,401,{error:'Your sign-in session is invalid. Please sign in again.'});}if(!userContext)return send(res,401,{error:'Sign in to use account features.'});}
+  if(isProject&&!userContext)return send(res,401,{error:'Sign in to run projects.'});
+  if(!['python','javascript'].includes(body.language)){if(!userContext)return send(res,401,{error:'Sign in to unlock Java, C and C++.'});try{const rows=await userRows('draco_user_languages',userContext.user.id,userContext.token,config,'language');if(!rows.some(row=>row.language===body.language))return send(res,403,{error:'Add this language to your account before running it.'});}catch{return send(res,503,{error:'Could not verify your installed languages. Please retry.'});}}
+  if(userContext){try{const rows=await userRows('draco_user_packages',userContext.user.id,userContext.token,config,'language,package_name,package_version');packages=validatedPackages(body.language,rows.filter(row=>row.language===body.language));}catch{return send(res,503,{error:'Could not load your package list. Please retry.'});}}
+  const requestId = randomUUID();
+  const fingerprint = config
+    ? requestFingerprint(req, config.fingerprintSecret)
+    : requestFingerprint(req, 'local-development-only-fingerprint-key');
+
+  if (config) {
+    let quota;
+    try {
+      quota = await callSupabaseRpc('code_consume_run', {
+        p_backend_secret: config.backendSecret,
+        p_fingerprint_hash: fingerprint,
+        p_limit: RUN_LIMIT,
+        p_window_seconds: RUN_WINDOW_SECONDS
+      }, config);
+    } catch {
+      return send(res, 503, { error: 'The execution service could not verify its run limit. Please retry shortly.' });
+    }
+    const row = Array.isArray(quota) ? quota[0] : quota;
+    if (!row || row.is_allowed !== true) {
+      return send(res, 429, {
+        error: 'Run limit reached. Please wait before running another program.',
+        remaining: Math.max(0, Number(row?.remaining_requests) || 0),
+        resetAt: row?.reset_at || null
+      });
+    }
+  } else if (limited(fingerprint, RUN_LIMIT, RUN_WINDOW_SECONDS * 1000)) {
+    return send(res, 429, { error: 'Too many runs. Please wait a minute.' });
+  }
+  return { body, isProject, config, packages, requestId, fingerprint };
+}
+
 export default async function handler(req, res) {
   const u = new URL(req.url, 'http://localhost');
   const forwarded = u.searchParams.get('path');
@@ -229,61 +289,38 @@ export default async function handler(req, res) {
     if (req.method === 'GET' && path === '/sandboxes') {
       return send(res, 200, await describe(undefined, { probe: u.searchParams.get('probe') === '1' }));
     }
-    if (req.method === 'POST' && path === '/execute') {
+    if (path.startsWith('/session/') && req.method === 'POST') {
+      const ip = String(req.headers?.['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';
+      if (path !== '/session/start' && limited('session:' + ip, 900, 60_000)) return send(res, 429, { error: 'Too many terminal requests. Slow down a little.' });
+      if (path === '/session/start') {
+        const admitted = await admitRun(req, res);
+        if (!admitted) return;
+        const { body, isProject, config, packages, requestId, fingerprint } = admitted;
+        const source = isProject ? { files: body.files, entry: body.entry } : { code: body.code };
+        const [result, status] = await startSession(body.language, source, body.stdin || '', { packages });
+        res.setHeader('X-Request-Id', requestId);
+        if (config) {
+          try { await callSupabaseRpc('code_record_execution', { p_backend_secret: config.backendSecret, p_request_id: requestId, p_fingerprint_hash: fingerprint, p_language: body.language, ...safeRunMetrics(body, result, status) }, config); }
+          catch { console.error('Draco Code: execution telemetry could not be recorded.'); }
+        }
+        return send(res, status, result);
+      }
       const contentLength = Number(req.headers?.['content-length'] || 0);
-      if (contentLength > MAX_BODY_BYTES) return send(res, 413, { error: 'Request is too large.' });
+      if (contentLength > 20_000) return send(res, 413, { error: 'Request is too large.' });
       const body = bodyObject(req);
       if (!body) return send(res, 400, { error: 'Invalid JSON body.' });
-      if (Buffer.byteLength(JSON.stringify(body), 'utf8') > MAX_BODY_BYTES) return send(res, 413, { error: 'Request is too large.' });
-      const isProject = body.files !== undefined;
-      if (typeof body.language !== 'string' || (body.stdin !== undefined && typeof body.stdin !== 'string') || (isProject ? (!Array.isArray(body.files) || typeof body.entry !== 'string') : typeof body.code !== 'string')) {
-        return send(res, 400, { error: isProject ? 'Expected language, files, entry and optional stdin.' : 'Expected language, code and optional stdin as strings.' });
-      }
-      if (Buffer.byteLength(body.stdin || '', 'utf8') > 100_000 || (!isProject && Buffer.byteLength(body.code, 'utf8') > 200_000)) {
-        return send(res, 413, { error: 'Code or input exceeds the supported size limit.' });
-      }
-      if (!['python', 'javascript', 'java', 'c', 'cpp'].includes(body.language)) {
-        return send(res, 400, { error: 'Unsupported language. Choose Python, JavaScript, Java, C or C++.' });
-      }
-
-      const config = supabaseConfig();
-      const production = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
-      if (!config && production) return send(res, 503, { error: 'Execution service is not configured. Please contact the site operator.' });
-
-      let userContext=null, packages=[];
-      if(req.headers?.authorization){try{userContext=await authenticatedUser(req,config);}catch{return send(res,401,{error:'Your sign-in session is invalid. Please sign in again.'});}if(!userContext)return send(res,401,{error:'Sign in to use account features.'});}
-      if(isProject&&!userContext)return send(res,401,{error:'Sign in to run projects.'});
-      if(!['python','javascript'].includes(body.language)){if(!userContext)return send(res,401,{error:'Sign in to unlock Java, C and C++.'});try{const rows=await userRows('draco_user_languages',userContext.user.id,userContext.token,config,'language');if(!rows.some(row=>row.language===body.language))return send(res,403,{error:'Add this language to your account before running it.'});}catch{return send(res,503,{error:'Could not verify your installed languages. Please retry.'});}}
-      if(userContext){try{const rows=await userRows('draco_user_packages',userContext.user.id,userContext.token,config,'language,package_name,package_version');packages=validatedPackages(body.language,rows.filter(row=>row.language===body.language));}catch{return send(res,503,{error:'Could not load your package list. Please retry.'});}}
-      const requestId = randomUUID();
-      const fingerprint = config
-        ? requestFingerprint(req, config.fingerprintSecret)
-        : requestFingerprint(req, 'local-development-only-fingerprint-key');
-
-      if (config) {
-        let quota;
-        try {
-          quota = await callSupabaseRpc('code_consume_run', {
-            p_backend_secret: config.backendSecret,
-            p_fingerprint_hash: fingerprint,
-            p_limit: RUN_LIMIT,
-            p_window_seconds: RUN_WINDOW_SECONDS
-          }, config);
-        } catch {
-          return send(res, 503, { error: 'The execution service could not verify its run limit. Please retry shortly.' });
-        }
-        const row = Array.isArray(quota) ? quota[0] : quota;
-        if (!row || row.is_allowed !== true) {
-          return send(res, 429, {
-            error: 'Run limit reached. Please wait before running another program.',
-            remaining: Math.max(0, Number(row?.remaining_requests) || 0),
-            resetAt: row?.reset_at || null
-          });
-        }
-      } else if (limited(fingerprint, RUN_LIMIT, RUN_WINDOW_SECONDS * 1000)) {
-        return send(res, 429, { error: 'Too many runs. Please wait a minute.' });
-      }
-
+      let out;
+      if (path === '/session/poll') out = await pollSession(body.session, body.offset, body.wait);
+      else if (path === '/session/input') out = await sendInput(body.session, body.text);
+      else if (path === '/session/eof') out = await sendEof(body.session);
+      else if (path === '/session/stop') out = await stopSession(body.session);
+      else return send(res, 404, { error: 'Not found.' });
+      return send(res, out[1], out[0]);
+    }
+    if (req.method === 'POST' && path === '/execute') {
+      const admitted = await admitRun(req, res);
+      if (!admitted) return;
+      const { body, isProject, config, packages, requestId, fingerprint } = admitted;
       const [result, status] = isProject
         ? await executeProject(body.language, body.files, body.entry, body.stdin || '', undefined, {packages})
         : await execute(body.language, body.code, body.stdin || '', undefined, {packages});

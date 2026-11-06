@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+const { Screen } = createRequire(import.meta.url)('../app/terminal.js');
+let pass = 0; const t = (n, f) => { f(); pass++; console.log('  PASS ', n); };
+const text = (...chunks) => { const s = new Screen(); chunks.forEach((c) => s.write(c)); return s.text(); };
+t('plain lines', () => assert.equal(text('a\nb\n'), 'a\nb\n'));
+t('output split across chunks joins up (prompt without newline)', () => assert.equal(text('Name', ': '), 'Name: '));
+t('carriage return overwrites the line', () => assert.equal(text('loading 10%\rloading 99%\n'), 'loading 99%\n'));
+t('CR + shorter text leaves the remainder, like a real terminal', () => assert.equal(text('abcdef\rXY'), 'XYcdef'));
+t('CRLF is a normal newline', () => assert.equal(text('a\r\nb\r\n'), 'a\nb\n'));
+t('backspace moves left and overwrites', () => assert.equal(text('abc\b\bX'), 'aXc'));
+t('ANSI colours and cursor codes are stripped', () => assert.equal(text('\x1b[31mred\x1b[0m \x1b[2K\x1b]0;title\x07ok'), 'red ok'));
+t('control characters (bell) are dropped, tabs expand', () => { assert.equal(text('a\x07b'), 'ab'); assert.equal(text('a\tb'), 'a       b'); });
+t('take() hands out finished lines exactly once', () => { const s = new Screen(); s.write('one\ntwo'); assert.equal(s.take(), 'one\n'); assert.equal(s.take(), ''); s.write('\n'); assert.equal(s.take(), 'two\n'); });
+t('unicode survives', () => assert.equal(text('héllo ✓ 日本\n'), 'héllo ✓ 日本\n'));
+console.log(`\n${pass} passed, 0 failed`);

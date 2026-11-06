@@ -245,7 +245,7 @@ button, select, textarea { font-family: var(--font-ui); }
 }
 .main-column[data-layout="stacked"] {
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: minmax(260px, 1.35fr) minmax(240px, .9fr);
+  grid-template-rows: minmax(240px, 1fr) minmax(280px, 1fr);
 }
 .main-column[data-layout="stacked"] .editor-panel {
   grid-column: 1;
@@ -366,3 +366,21 @@ body[data-mode="project"] .app-footer { display: none; }
   body[data-mode="project"] .topbar-left .brand { display: none; }
   body[data-mode="project"] .topbar-actions { flex: 0 0 auto; overflow: visible; padding: 0; }
 }
+
+/* ---------- Terminal: a real, interactive console (dark window, like a terminal emulator) ---------- */
+:root { --term-bg: #0d1117; --term-fg: #d9dee7; --term-dim: #7d8794; --term-green: #6fd08c; --term-red: #ff7b7b; --term-amber: #e8c26a; }
+.console-output.term-host, .ide-panel-body.term-host { padding: 0; background: var(--term-bg); color: var(--term-fg); white-space: normal; cursor: text; }
+.term { min-height: 100%; padding: 12px 16px 20px; }
+.term-pre { margin: 0; font: 12.5px/1.6 var(--font-code); color: var(--term-fg); white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 8; }
+.term-sys { color: var(--term-dim); }
+.term-sys.prompt { color: var(--term-green); }
+.term-sys.err { color: var(--term-red); }
+.term-sys.warn { color: var(--term-amber); }
+.term-sys.boot { font-style: italic; }
+.term-input { display: inline-block; width: 1ch; min-width: 1ch; max-width: 100%; margin: 0; padding: 0; border: 0; border-radius: 0; outline: 0; background: transparent; color: var(--term-fg); font: inherit; caret-color: var(--ember-hot); vertical-align: baseline; box-shadow: none; }
+.term-input[hidden] { display: none; }
+.term-host:focus-within { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ember) 45%, transparent); }
+.stop-button { color: var(--err); }
+.stop-button:hover { background: color-mix(in srgb, var(--err) 12%, transparent); }
+.stop-button[hidden] { display: none; }
+::selection { background: color-mix(in srgb, var(--quench) 45%, transparent); }

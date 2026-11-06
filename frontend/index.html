@@ -80,7 +80,7 @@
         </div>
       </aside>
 
-      <section class="main-column" aria-label="Code workspace">
+      <section class="main-column" data-layout="stacked" aria-label="Code workspace">
         <section class="editor-panel" aria-label="Code editor">
           <div class="editor-toolbar">
             <div class="file-context">
@@ -89,9 +89,9 @@
               <span class="save-state" id="save-state" role="status">Saved locally</span>
             </div>
             <div class="editor-actions">
-              <button class="quiet-button layout-toggle-button" id="layout-toggle-button" type="button" aria-label="Switch to stacked layout" aria-pressed="true" title="Switch to stacked layout">
+              <button class="quiet-button layout-toggle-button" id="layout-toggle-button" type="button" aria-label="Switch to split layout" aria-pressed="false" title="Switch to split layout">
                 <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2" y="2" width="10" height="16" rx="1.5"></rect><rect x="14" y="2" width="4" height="7" rx="1"></rect><rect x="14" y="11" width="4" height="7" rx="1"></rect></svg>
-                <span id="layout-toggle-label">Split view</span>
+                <span id="layout-toggle-label">Stacked view</span>
               </button>
               <button class="quiet-button" id="reset-button" type="button" title="Restore the starter template">Reset</button>
               <button class="quiet-button danger-quiet" id="clear-button" type="button" title="Clear editor">Clear</button>
@@ -115,18 +115,19 @@
 
         <section class="console-panel" aria-label="Program output">
           <div class="console-toolbar">
-            <div class="console-title"><span class="console-icon">›_</span><span>Console</span><span class="console-subtitle" id="console-subtitle">Ready when you are</span></div>
+            <div class="console-title"><span class="console-icon">›_</span><span>Terminal</span><span class="console-subtitle" id="console-subtitle">Ready when you are</span></div>
             <div class="console-actions">
-              <button class="quiet-button" id="clear-output-button" type="button">Clear output</button>
-              <button class="quiet-button" id="toggle-input-button" type="button" aria-expanded="true" aria-controls="stdin-wrap">Standard input <span class="chevron">⌄</span></button>
+              <button class="quiet-button stop-button" id="stop-button" type="button" title="Stop the program (Ctrl+C in the terminal)" hidden>Stop</button>
+              <button class="quiet-button" id="clear-output-button" type="button">Clear</button>
+              <button class="quiet-button" id="toggle-input-button" type="button" aria-expanded="false" aria-controls="stdin-wrap" title="Optional: text to feed the program before you type anything">Preset input <span class="chevron">⌄</span></button>
             </div>
           </div>
-          <div class="stdin-wrap" id="stdin-wrap">
-            <label for="stdin-input">STDIN <span>Text your program reads from standard input</span></label>
+          <div class="stdin-wrap" id="stdin-wrap" hidden>
+            <label for="stdin-input">PRESET INPUT <span>Optional. Fed to the program as soon as it starts. You can also just type in the terminal.</span></label>
             <textarea id="stdin-input" rows="2" placeholder="Enter input here…" spellcheck="false"></textarea>
           </div>
           <div class="console-output" id="console-output" aria-live="polite" aria-relevant="additions text">
-            <div class="empty-output"><span class="empty-output-mark">›</span><div><strong>Output will appear here</strong><p>Run your program to see standard output, errors and execution time.</p></div></div>
+            <div class="empty-output"><span class="empty-output-mark">›</span><div><strong>Your terminal is ready</strong><p>Press Run. The program starts here, and when it asks for input you can type right in this window.</p></div></div>
           </div>
           <div class="console-footer"><span class="result-state" id="result-state"><span class="result-dot"></span><span>Idle</span></span><span id="execution-time"></span></div>
         </section>
@@ -185,15 +186,15 @@
           <section class="ide-panel" id="ide-panel" aria-label="Output panel">
             <div class="ide-panel-head">
               <div class="ide-panel-tabs" role="tablist">
-                <button type="button" role="tab" class="active" data-panel="output">Output</button>
+                <button type="button" role="tab" class="active" data-panel="output">Terminal</button>
                 <button type="button" role="tab" data-panel="problems">Problems <span class="ide-count" id="problems-count" hidden>0</span></button>
                 <button type="button" role="tab" data-panel="input">Input</button>
               </div>
-              <div class="ide-panel-actions"><span class="ide-run-meta" id="ide-run-meta"></span><button type="button" id="panel-clear" title="Clear output" aria-label="Clear output"><svg viewBox="0 0 24 24"><path d="M5 7h14M9 7V5h6v2M7 7l1 12h8l1-12"/></svg></button><button type="button" id="panel-toggle" title="Hide panel" aria-label="Hide panel"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button></div>
+              <div class="ide-panel-actions"><span class="ide-run-meta" id="ide-run-meta"></span><button type="button" id="panel-stop" class="ide-stop" title="Stop the program (Ctrl+C in the terminal)" aria-label="Stop the program" hidden><svg viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/></svg></button><button type="button" id="panel-clear" title="Clear output" aria-label="Clear output"><svg viewBox="0 0 24 24"><path d="M5 7h14M9 7V5h6v2M7 7l1 12h8l1-12"/></svg></button><button type="button" id="panel-toggle" title="Hide panel" aria-label="Hide panel"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button></div>
             </div>
-            <div class="ide-panel-body" id="panel-output" role="tabpanel"><div class="ide-empty">Run the project to see its output here.</div></div>
+            <div class="ide-panel-body" id="panel-output" role="tabpanel"><div class="ide-empty">Run the project to start it in this terminal. When it asks for input, type right here.</div></div>
             <div class="ide-panel-body" id="panel-problems" role="tabpanel" hidden><div class="ide-empty">No problems detected.</div></div>
-            <div class="ide-panel-body" id="panel-input" role="tabpanel" hidden><label for="ide-stdin" class="sr-only">Standard input</label><textarea id="ide-stdin" placeholder="Text your program reads from standard input…" spellcheck="false"></textarea></div>
+            <div class="ide-panel-body" id="panel-input" role="tabpanel" hidden><label for="ide-stdin" class="sr-only">Standard input</label><textarea id="ide-stdin" placeholder="Optional preset input, fed to the program when it starts…" spellcheck="false"></textarea></div>
           </section>
         </div>
       </div>
@@ -279,6 +280,7 @@
   <script src="./assets/config.js"></script>
   <script src="./assets/highlight.js"></script>
   <script src="./assets/editor.js"></script>
+  <script src="./app/terminal.js"></script>
   <script src="./app/project-core.js"></script>
   <script src="./app/project-data.js"></script>
   <script src="./app/app.js"></script>

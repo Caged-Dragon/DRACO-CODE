@@ -10,11 +10,14 @@ import path from 'node:path';
 const ROOT = '/vercel/sandbox';
 export let created = 0, stopped = 0;
 
-export async function fakeFactory() {
+export const registry = new Map();            // named sandboxes, like Sandbox.get({ name })
+globalThis.__DRACO_SANDBOX_GET = async (name) => registry.get(name) || null;
+export async function fakeFactory(opts = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), 'fakesbx-'));
   created++;
+  const children = [];
   const map = (p) => (p.startsWith(ROOT) ? path.join(dir, p.slice(ROOT.length)) : path.join(dir, p));
-  return {
+  const sandbox = {
     async writeFiles(files) {
       for (const f of files) {
         const dest = map(f.path);
@@ -27,7 +30,7 @@ export async function fakeFactory() {
     },
     runCommand({ cmd, args = [], cwd, detached }) {
       if (detached) { // keep running after we return, like a real detached command
-        execFile(cmd, args, { cwd: cwd ? map(cwd) : dir }, () => {});
+        const child = execFile(cmd, args, { cwd: cwd ? map(cwd) : dir, detached: true }, () => {}); children.push(child);
         return Promise.resolve({});
       }
       return new Promise((resolve) => {
@@ -36,8 +39,11 @@ export async function fakeFactory() {
         });
       });
     },
-    async stop() { stopped++; await rm(dir, { recursive: true, force: true }); },
+    async stop() { if (stoppedOnce) return; stoppedOnce = true; stopped++; for (const c of children) { try { process.kill(-c.pid, 'SIGKILL'); } catch { /* gone */ } } if (opts.name) registry.delete(opts.name); await rm(dir, { recursive: true, force: true }); },
   };
+  let stoppedOnce = false;
+  if (opts.name) registry.set(opts.name, sandbox);
+  return sandbox;
 }
 
 // Stand-in for the setup client (lib/toolchain.js): one named sandbox + one snapshot slot, in memory.

@@ -23,7 +23,7 @@ for (const [name, content] of [['app.js', app], ['project.js', projectJs], ['pro
   assert.equal(result.status, 0, `${name} syntax error: ${result.stderr}`);
 }
 
-for (const asset of ['assets/design.css', 'assets/theme.js', 'assets/highlight.js', 'assets/editor.js', 'assets/config.js', 'app/styles.css', 'app/project.css', 'app/project.js', 'app/project-core.js', 'app/project-data.js', 'app/app.js', 'assets/dracoskill-mark.png', 'assets/icons/favicon-32.png']) {
+for (const asset of ['assets/design.css', 'assets/theme.js', 'assets/highlight.js', 'assets/editor.js', 'assets/config.js', 'app/styles.css', 'app/project.css', 'app/terminal.js', 'app/project.js', 'app/project-core.js', 'app/project-data.js', 'app/app.js', 'assets/dracoskill-mark.png', 'assets/icons/favicon-32.png']) {
   await access(path.join(root, asset));
 }
 assert.match(config, /https:\/\/draco-code-backend\.vercel\.app/);
@@ -76,9 +76,13 @@ assert.match(app, /emailRedirectTo: authRedirectUrl\(\)/);
 assert.match(app, /confirm your email using the link we sent/i);
 
 assert.match(html, /id="layout-toggle-button"/);
-assert.match(html, /id="layout-toggle-label">Split view/);
-assert.match(html, /aria-expanded="true" aria-controls="stdin-wrap"/);
-assert.doesNotMatch(html, /id="stdin-wrap" hidden/);
+assert.match(html, /id="layout-toggle-label">Stacked view/);
+assert.match(html, /class="main-column" data-layout="stacked"/, "stacked layout is the default");
+assert.match(html, /<span>Terminal<\/span>/, "console is presented as a terminal");
+assert.match(html, /app\/terminal\.js/);
+assert.match(sw, /app\/terminal\.js/);
+assert.match(html, /aria-expanded="false" aria-controls="stdin-wrap"/); // preset input is optional, collapsed by default
+assert.match(html, /id="stdin-wrap" hidden/);
 assert.match(app, /const LAYOUT_STORAGE_KEY = 'draco-code-layout-v1'/);
 assert.match(app, /function loadSavedLayout\(\)/);
 assert.match(app, /function setLayout\(layout\)/);

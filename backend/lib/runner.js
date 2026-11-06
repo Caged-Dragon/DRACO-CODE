@@ -14,7 +14,7 @@ import { validateProject, isSource, extOf, HEADER_EXT, javaMainClass } from './p
 
 export const RUN_LANGUAGES = ['python', 'javascript', 'java', 'c', 'cpp'];
 export const LABELS = { python: 'Python', javascript: 'JavaScript', java: 'Java', c: 'C', cpp: 'C++' };
-const ROOT = '/vercel/sandbox';
+export const ROOT = '/vercel/sandbox';
 const MAX_OUT = 20_000;
 const RUN_TIMEOUT = Number(process.env.SF_TIMEOUT || 5);
 const COMPILE_TIMEOUT = Number(process.env.SF_COMPILE_TIMEOUT || 25);
@@ -24,9 +24,10 @@ export const MAX_STDIN = 100_000;
 const JAVA_FLAGS = '-Xmx256m -Xss1m -XX:+UseSerialGC -XX:TieredStopAtLevel=1';
 
 // Tests replace this to run against a local stand-in instead of real microVMs.
-export async function defaultFactory() {
-  const params = { timeout: 90_000, persistent: false, networkPolicy: 'deny-all', resources: { vcpus: 1 }, region: process.env.DRACO_SANDBOX_REGION || 'iad1' };
+export async function defaultFactory(opts = {}) {
+  const params = { timeout: opts.timeoutMs || 90_000, persistent: false, networkPolicy: 'deny-all', resources: { vcpus: 1 }, region: process.env.DRACO_SANDBOX_REGION || 'iad1' };
   const snapshotId = await findSnapshotId(); // env override, else the snapshot made by /setup
+  if (opts.name) params.name = opts.name;
   if (snapshotId) params.source = { type: 'snapshot', snapshotId };
   return Sandbox.create(params);
 }
@@ -152,7 +153,7 @@ export class RunSession {
 }
 
 // bash reports a missing program as exit 127 + 'not found'; require both so a user program that merely exits 127 isn't misreported.
-const missingTool = (r) => r.exitCode === 127 && /not found/i.test(r.stderr || '');
+export const missingTool = (r) => r.exitCode === 127 && /not found/i.test(r.stderr || '');
 
 export function setupUrl() {
   const configured = String(process.env.DRACO_BACKEND_URL || '').trim();
@@ -167,7 +168,7 @@ export function setupUrl() {
   }
 }
 
-function missingMessage(language) {
+export function missingMessage(language) {
   return `${LABELS[language]} isn't installed in the sandbox image yet. One-time fix: open ${setupUrl()} in your browser and click "Start setup". ` +
          `It takes a few minutes; Python and JavaScript work in the meantime.`;
 }
