@@ -83,3 +83,27 @@ The console is now a real terminal. The program keeps running in its sandbox whi
 - Frontend: `frontend/app/terminal.js`, used by the compiler page and by Project mode. If the backend has no `/session/*` routes yet (frontend deployed first), the page falls back to the old one-shot `/execute` run automatically.
 - Optional environment variable: `DRACO_SESSION_SECONDS` (backend). No new secrets are needed; tokens are signed with `CODE_RATE_LIMIT_SECRET`.
 - Not a full terminal emulator: programs that draw full-screen UIs (curses, vim) are not supported. Colour codes are stripped.
+
+
+## Package installs never break a run (update)
+
+Packages are installed best-effort, once per run, inside a 60 second shared budget. A package that cannot be installed is skipped and reported ("Package X: could not be installed ... It was skipped"); the program still runs, and the network is always closed again before your code starts (if it cannot be closed, the code is not run). Sandbox timeouts are reported as timeouts (HTTP 504), no longer as "used up the free allowance". The database enforces package and language rules itself (see `supabase/README.md`).
+
+## Logo
+
+The site logo is `frontend/assets/draco-code-logo.png` (top bar, menu, sign-in dialog, Project mode) and `frontend/assets/icons/favicon-32.png` / `favicon-64.png`.
+
+
+## Branding and themes (update)
+
+- **Logos.** `brand/Draco-Code.ico` (product) and `brand/cageddragon_logo.ico` (company) are the source files. The page uses each icon's own hand-tuned frame for the size shown: Draco Code in the top bar, menu, sign-in dialog and Project mode; the CagedDragon badge beside the brand, in the footer, the menu and the About dialog. `frontend/favicon.ico` keeps all six original frames; PNG favicons are also provided.
+- **Themes.** Light mode is **gold** (warm ivory surfaces, gold accent, deep-gold text); dark mode is **purple** (deep violet surfaces, violet accent). Both are driven by the tokens in `frontend/assets/design.css` and keep WCAG AA contrast for text. The site follows the device setting until the visitor chooses; Settings can pin Light, Dark or System.
+
+## New features (update)
+
+- **Command palette** (Ctrl/Cmd+K, or the search icon): every action, program, language switch and example, with fuzzy search. In Project mode it also offers project commands.
+- **Settings** (menu): theme, font size 11 to 20 and tab width 2/4/8, applied live to the editor and terminal and remembered on this device.
+- **Examples**: 20 ready-to-run programs (4 per language) that open as new programs; each is executed by the test suite.
+- **Keyboard shortcuts** (`?`) and **About** dialogs.
+- **Terminal Copy** button.
+- **Project mode**: search across files (Ctrl/Cmd+Shift+F), download the project as a `.zip`, upload files (button or drag and drop).

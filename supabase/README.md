@@ -70,3 +70,7 @@ email confirmation enabled unless the product owner deliberately chooses auto-co
 ## Project mode tables (added)
 
 `draco_projects` and `draco_project_files` (+ `draco_rename_path`, `draco_delete_path`) are created by `migrations/20261105090000_draco_projects.sql`. RLS limits every row to its owner; `anon` has no access. Limits enforced in the database: 25 projects per user, 100 entries and 300 KB per project, 100 KB per file. Source code of projects is stored here by design (unlike one-off runs, which are never stored).
+
+## Language and package storage hardening (added)
+
+`migrations/20261106090000_draco_packages_hardening.sql` makes the database enforce what the site can actually install: one validity function shared with the browser and backend, case-insensitive uniqueness, 20 packages per language, packages only for languages the account has added, packages removed with their language, `user_id` defaults, owner-only access re-asserted, and a PostgREST schema-cache reload. It first deletes rows the backend could never have used (malformed names, case duplicates, packages for a language the account does not have). **Apply it once** in the Supabase SQL Editor; it is safe to run twice.

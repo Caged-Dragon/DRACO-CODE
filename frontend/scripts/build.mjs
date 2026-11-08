@@ -14,7 +14,7 @@ if (!/^sb_publishable_[A-Za-z0-9_-]+$/.test(process.env.SUPABASE_ANON_KEY) && pr
 
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
-for (const name of ['index.html', 'sw.js', 'assets', 'app']) {
+for (const name of ['index.html', 'sw.js', 'favicon.ico', 'assets', 'app']) {
   await cp(resolve(root, name), resolve(dist, name), { recursive: true });
 }
 const config = {

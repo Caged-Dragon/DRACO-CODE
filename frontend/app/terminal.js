@@ -160,19 +160,21 @@
       if (res.status === 404 && p.fallback) { S.running = false; return p.fallback(); }   // older backend without terminal sessions
       if (res.status !== 200 || (!res.json.session && !res.json.done)) {
         S.running = false; var msg = res.json.error || 'The run could not be started.';
-        sys('[' + msg + ']\n', 'err'); status('error', res.status === 429 ? 'Rate limit' : res.status === 503 ? 'Service unavailable' : 'Request failed');
+        sys('[' + msg + ']\n', 'err'); status('error', res.status === 429 ? 'Rate limit' : res.status === 504 ? 'Timed out' : res.status === 503 ? 'Service unavailable' : 'Request failed');
         if (opts.onFinish) opts.onFinish({ kind: 'error', label: 'Request failed', httpStatus: res.status, error: msg, text: '' }); return;
       }
       if (res.json.done) { // compile error: nothing is running
         if (res.json.stderr) feed(res.json.stderr + (/\n$/.test(res.json.stderr) ? '' : '\n'));
         finish({ compileError: !!res.json.compileError, exitCode: res.json.exitCode, force: true }); return;
       }
+      (res.json.warnings || []).forEach(function (w) { sys('[' + w + ']\n', 'warn'); });   // e.g. a package that could not be installed
       S.session = res.json.session; status('running', 'Running'); ui.input.hidden = false; resizeInput(); ui.input.focus({ preventScroll: true }); scrollDown();
       loop(token);
     }
 
     function reset(placeholderNode) { S.running = false; S.token++; host.classList.remove('term-host'); host.replaceChildren(placeholderNode); }
-    return { run: run, stop: function () { stop(true); }, isRunning: function () { return S.running; }, focus: function () { if (S.running) ui.input.focus(); }, text: function () { return S.screen.text(); }, reset: reset, clear: function () { if (S.running) clearScreen(); } };
+    /* text() returns the whole transcript (prompt line, output, exit line), like selecting the terminal */
+    return { run: run, stop: function () { stop(true); }, isRunning: function () { return S.running; }, focus: function () { if (S.running) ui.input.focus(); }, text: function () { return ui.pre ? ui.pre.textContent : S.screen.text(); }, reset: reset, clear: function () { if (S.running) clearScreen(); } };
   }
   return { create: create, Screen: Screen };
 });

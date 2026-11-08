@@ -3,6 +3,9 @@
 // undo/redo, selection, IME and accessibility keep working natively.
 (function () {
   var nativeValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+  var instances = [];
+  // Indent unit comes from the person's settings (DracoEditorConfig.indent), 4 spaces by default.
+  function unit() { var c = window.DracoEditorConfig; return (c && typeof c.indent === 'string' && c.indent) || '    '; }
 
   function attach(ta, opts) {
     opts = opts || {};
@@ -77,7 +80,7 @@
       var v = ta.value, s = ta.selectionStart, e = ta.selectionEnd;
       var ls = v.lastIndexOf('\n', s - 1) + 1;
       var block = v.slice(ls, e);
-      var nb = block.split('\n').map(function (l) { return outdent ? l.replace(/^( {1,4}|\t)/, '') : '    ' + l; }).join('\n');
+      var nb = block.split('\n').map(function (l) { return outdent ? l.replace(new RegExp('^(?: {1,' + unit().length + '}|\\t)'), '') : unit() + l; }).join('\n');
       ta.setSelectionRange(ls, e);
       insert(nb);
       ta.setSelectionRange(ls, ls + nb.length);
@@ -93,7 +96,7 @@
       if (e.key === 'Tab') {
         e.preventDefault();
         var multi = ta.value.slice(ta.selectionStart, ta.selectionEnd).indexOf('\n') !== -1;
-        if (e.shiftKey || multi) reindent(e.shiftKey); else insert('    ');
+        if (e.shiftKey || multi) reindent(e.shiftKey); else insert(unit());
       } else if (e.key === 'Enter' && !e.shiftKey && ta.selectionStart === ta.selectionEnd) {
         var v = ta.value, pos = ta.selectionStart;
         var ls = v.lastIndexOf('\n', pos - 1) + 1;
@@ -102,11 +105,11 @@
         var deeper = prev === '{' || prev === '(' || prev === '[' || (lang === 'python' && prev === ':');
         e.preventDefault();
         if (prev === '{' && next === '}') {
-          insert('\n' + ind + '    ' + '\n' + ind);
-          var p = pos + 1 + ind.length + 4;
+          insert('\n' + ind + unit() + '\n' + ind);
+          var p = pos + 1 + ind.length + unit().length;
           ta.setSelectionRange(p, p);
         } else {
-          insert('\n' + ind + (deeper ? '    ' : ''));
+          insert('\n' + ind + (deeper ? unit() : ''));
         }
       }
     });
@@ -122,8 +125,11 @@
       focus: function () { ta.focus(); }
     };
     ta.__draco = api;
+    instances.push({ ta: ta, refresh: refresh });
     refresh();
     return api;
   }
-  window.DracoEditor = { attach: attach };
+  // After a font-size / tab-width change every open editor must re-measure.
+  function refreshAll() { instances = instances.filter(function (i) { return i.ta.isConnected; }); instances.forEach(function (i) { i.refresh(); }); }
+  window.DracoEditor = { attach: attach, refreshAll: refreshAll };
 })();

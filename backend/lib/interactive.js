@@ -11,7 +11,7 @@ import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { Sandbox } from '@vercel/sandbox';
 import {
   RunSession, ProjectSession, ROOT, getFactory, compileFailure, missingTool, missingMessage,
-  isCapacityError, CAPACITY_MESSAGE, RUN_LANGUAGES, MAX_CODE, MAX_STDIN,
+  isCapacityError, isTimeoutError, CAPACITY_MESSAGE, TIMEOUT_MESSAGE, packageWarnings, RUN_LANGUAGES, MAX_CODE, MAX_STDIN,
 } from './runner.js';
 import { validateProject } from './project.js';
 
@@ -94,7 +94,8 @@ export async function startSession(language, source, stdin = '', options = {}) {
   if ((stdin || '').length > MAX_STDIN) return [{ error: 'Input is too large (100 KB max).' }, 413];
   const name = `draco-${randomUUID()}`;
   const base = options.factory || getFactory();
-  const factory = () => base({ name, timeoutMs: (SESSION_SECONDS + 30) * 1000 });
+  // sandbox lifetime = package install time (if any) + the program's own limit
+  const factory = (o) => base({ name, timeoutMs: (SESSION_SECONDS + 30) * 1000 + (o?.timeoutMs ? 120_000 : 0) });
   const packages = Array.isArray(options.packages) ? options.packages : [];
   let s;
   if (Array.isArray(source.files)) {
@@ -113,7 +114,8 @@ export async function startSession(language, source, stdin = '', options = {}) {
     if (c && c.error) return [{ error: c.error }, 400];
     if (c && c.exitCode !== 0) {
       if (missingTool(c)) return [{ error: missingMessage(language) }, 503];
-      return [{ ...compileFailure(c), done: true }, 200];
+      const w = packageWarnings(s);
+      return [{ ...compileFailure(c), done: true, ...(w.length ? { warnings: w, stderr: w.join('\n') + '\n' + (compileFailure(c).stderr || '') } : {}) }, 200];
     }
     await s.sb.writeFiles([
       { path: `${ROOT}/i_cmd.sh`, content: Buffer.from(interactiveCommand(s) + '\n') },
@@ -124,9 +126,10 @@ export async function startSession(language, source, stdin = '', options = {}) {
     ]);
     await s.sb.runCommand({ cmd: 'bash', args: ['i_run.sh'], cwd: ROOT, detached: true });
     keep = true;
-    return [{ session: signToken(name), maxSeconds: SESSION_SECONDS, compile: c ? { stdout: c.stdout, stderr: c.stderr, timeMs: c.timeMs } : null }, 200];
+    return [{ session: signToken(name), maxSeconds: SESSION_SECONDS, warnings: packageWarnings(s), compile: c ? { stdout: c.stdout, stderr: c.stderr, timeMs: c.timeMs } : null }, 200];
   } catch (e) {
     if (isCapacityError(e)) return [{ error: CAPACITY_MESSAGE, code: 'capacity' }, 503];
+    if (isTimeoutError(e)) return [{ error: TIMEOUT_MESSAGE, code: 'timeout' }, 504];
     return [{ error: `The sandbox service failed: ${e?.message || e}` }, 502];
   } finally {
     if (!keep) await s.close();

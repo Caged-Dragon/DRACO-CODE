@@ -117,3 +117,5 @@ revoke all on function public.draco_rename_path(uuid, text, text) from public, a
 revoke all on function public.draco_delete_path(uuid, text) from public, anon;
 grant execute on function public.draco_rename_path(uuid, text, text) to authenticated;
 grant execute on function public.draco_delete_path(uuid, text) to authenticated;
+
+notify pgrst, 'reload schema';

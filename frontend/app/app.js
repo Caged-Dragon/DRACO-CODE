@@ -44,9 +44,9 @@
     return 'p-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 9);
   }
 
-  function makeProgram(language, title) {
+  function makeProgram(language, title, code) {
     const meta = LANGUAGES[language] || LANGUAGES.python;
-    return { id: uid(), name: title || nextFilename(meta.file), language, code: meta.starter, updatedAt: Date.now() };
+    return { id: uid(), name: title || nextFilename(meta.file), language, code: typeof code === 'string' ? code : meta.starter, updatedAt: Date.now() };
   }
 
   function nextFilename(base) {
@@ -362,7 +362,7 @@
       });
       const data = await response.json().catch(() => ({}));
       if (data.error && response.status !== 200) {
-        showError(data.error, response.status === 429 ? 'Rate limit' : response.status === 503 ? 'Service unavailable' : 'Request failed');
+        showError(data.error, response.status === 429 ? 'Rate limit' : response.status === 504 ? 'Timed out' : response.status === 503 ? 'Service unavailable' : 'Request failed');
         return;
       }
       renderExecution(data, response.status);
@@ -389,18 +389,19 @@
     setResultState('error', title);
   }
 
-  function createProgram(language = languageSelect.value) {
+  // opts: { code, name } so an example (or anything else) can start a program with its own source.
+  function createProgram(language = languageSelect.value, opts = {}) {
     if (!canUseLanguage(language)) { openAccountPanel(); showToast('Sign in and add this language to unlock it.'); return; }
     if (state.programs.length >= MAX_PROGRAMS) {
       showToast(`You can keep up to ${MAX_PROGRAMS} local programs in this workspace.`);
       return;
     }
     if (activeProgram) activeProgram.code = editor.value;
-    const program = makeProgram(language);
+    const program = makeProgram(language, opts.name ? nextFilename(opts.name) : undefined, opts.code);
     state.programs.unshift(program);
     setActive(program.id);
     editor.focus();
-    showToast('New program created. It will autosave on this device.');
+    showToast(opts.toast || 'New program created. It will autosave on this device.');
   }
 
   function deleteProgram(id) {
@@ -558,11 +559,21 @@
     if(!list.length){const empty=document.createElement('p');empty.className='installed-empty';empty.textContent='No packages added for this language yet.';host.append(empty);return;}
     list.forEach(p=>{const row=document.createElement('div');row.className='installed-row';const name=document.createElement('span');name.textContent=p.package_name+(p.package_version?'@'+p.package_version:'');const remove=document.createElement('button');remove.type='button';remove.textContent='Remove';remove.addEventListener('click',()=>removePackage(p));row.append(name,remove);host.append(row);});
   }
+  // Turn database rule violations into plain sentences.
+  function accountDbMessage(error, fallback) {
+    const m = String(error?.message || '');
+    if (/duplicate key|already exists/i.test(m)) return 'That is already on your account.';
+    if (/valid_chk|check constraint/i.test(m)) return 'That package name or version is not supported for this language.';
+    if (/row-level security|permission denied|JWT/i.test(m)) return 'Your session expired. Sign in again and retry.';
+    if (/up to 20 packages|Add this language/i.test(m)) return m;
+    if (/Failed to fetch|NetworkError/i.test(m)) return 'Could not reach your account. Check your connection and retry.';
+    return fallback;
+  }
   async function addLanguage(language) {
     if(!accountUser){openAccountPanel();$('account-email').focus();showToast('Create an account to add languages.');return;}
     if(!['java','c','cpp'].includes(language)||accountBusy||installedLanguages.has(language))return;accountBusy=true;
     try{const {error}=await supabaseClient.from('draco_user_languages').insert({user_id:accountUser.id,language});if(error)throw error;await refreshAccountData();showToast(LABELS[language]+' added to your account.');}
-    catch(e){showToast(e.message||'Could not add this language.');}finally{accountBusy=false;}
+    catch(e){showToast(accountDbMessage(e,'Could not add this language. Please try again.'));}finally{accountBusy=false;}
   }
   async function addPackage() {
     if(!accountUser){openAccountPanel();showToast('Sign in to save packages to your account.');return;}
@@ -577,12 +588,12 @@
     if(version&&!/^[A-Za-z0-9.+_-]{1,80}$/.test(version)){showToast('Version contains unsupported characters.');return;}
     if(installedPackages.some(p=>p.language===language&&p.package_name.toLowerCase()===name.toLowerCase())){showToast('That package is already on your account.');return;}
     accountBusy=true;$('account-add-package').disabled=true;
-    try{const {error}=await supabaseClient.from('draco_user_packages').insert({user_id:accountUser.id,language,package_name:name,package_version:version});if(error)throw error;$('package-name').value='';$('package-version').value='';await refreshAccountData();showToast(name+' added. It will be installed in your next run.');}
-    catch(e){showToast(e.message||'Could not add this package.');}finally{accountBusy=false;$('account-add-package').disabled=false;}
+    try{const {error}=await supabaseClient.from('draco_user_packages').insert({user_id:accountUser.id,language,package_name:name,package_version:version});if(error)throw error;$('package-name').value='';$('package-version').value='';await refreshAccountData();showToast(name+' added. It is installed automatically when you run code. If it cannot be installed, the run still works and tells you why.');}
+    catch(e){showToast(accountDbMessage(e,'Could not add this package. Please try again.'));}finally{accountBusy=false;$('account-add-package').disabled=false;}
   }
   async function removePackage(p) {
     try{const {error}=await supabaseClient.from('draco_user_packages').delete().eq('language',p.language).eq('package_name',p.package_name);if(error)throw error;await refreshAccountData();showToast(p.package_name+' removed.');}
-    catch(e){showToast(e.message||'Could not remove package.');}
+    catch(e){showToast(accountDbMessage(e,'Could not remove package. Please try again.'));}
   }
   function setAuthMessage(message, kind) {
     const el = $('account-auth-message');
@@ -905,6 +916,19 @@
     getMode,
     setMode,
     onSession: (listener) => { sessionListeners.push(listener); },
+    // used by the command palette, examples and settings
+    run: () => runCode(),
+    stop: () => terminal.stop(),
+    isRunning: () => terminal.isRunning(),
+    programs: () => state.programs.map((p) => ({ id: p.id, name: p.name, language: p.language })),
+    activeProgramId: () => state.activeId,
+    activateProgram: (id) => { setMode('compiler'); if (activeProgram) activeProgram.code = editor.value; setActive(id); editor.focus(); },
+    newProgram: (language, opts) => { setMode('compiler'); createProgram(language, opts); },
+    changeLanguage: (language) => { setMode('compiler'); languageSelect.value = language; setLanguage(language); },
+    currentLanguage: () => activeProgram?.language || 'python',
+    languages: () => Object.keys(LANGUAGES).map((id) => ({ id, label: LANGUAGES[id].label, available: canUseLanguage(id) })),
+    toggleLayout: () => toggleLayout(),
+    openMenu, closeMenu,
     setConnection: updateConnection
   });
 
@@ -986,6 +1010,12 @@
   });
   $('clear-output-button').addEventListener('click', () => { if (terminal.isRunning()) terminal.clear(); else clearConsole(); });
   $('stop-button').addEventListener('click', () => terminal.stop());
+  $('copy-output-button').addEventListener('click', async () => {
+    const text = output.classList.contains('term-host') ? terminal.text() : output.innerText;
+    if (!text || !text.trim() || /Your terminal is ready/.test(text)) { showToast('Nothing to copy yet. Run your program first.'); return; }
+    try { await copyText(text.replace(/\n+$/, '') + '\n'); showToast('Terminal output copied.'); }
+    catch { showToast('Could not copy. Select the text and press Ctrl+C instead.'); }
+  });
   $('toggle-input-button').addEventListener('click', () => {
     const button = $('toggle-input-button');
     const wrap = $('stdin-wrap');

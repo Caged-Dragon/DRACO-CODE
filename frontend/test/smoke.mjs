@@ -23,7 +23,7 @@ for (const [name, content] of [['app.js', app], ['project.js', projectJs], ['pro
   assert.equal(result.status, 0, `${name} syntax error: ${result.stderr}`);
 }
 
-for (const asset of ['assets/design.css', 'assets/theme.js', 'assets/highlight.js', 'assets/editor.js', 'assets/config.js', 'app/styles.css', 'app/project.css', 'app/terminal.js', 'app/project.js', 'app/project-core.js', 'app/project-data.js', 'app/app.js', 'assets/dracoskill-mark.png', 'assets/icons/favicon-32.png']) {
+for (const asset of ['assets/design.css', 'assets/theme.js', 'assets/highlight.js', 'assets/editor.js', 'assets/config.js', 'app/styles.css', 'app/project.css', 'app/features.css', 'app/features-core.js', 'app/examples.js', 'app/features.js', 'app/terminal.js', 'app/project.js', 'app/project-core.js', 'app/project-data.js', 'app/app.js', 'assets/draco-code-logo.png', 'assets/draco-code-logo-64.png', 'assets/cageddragon-logo.png', 'assets/cageddragon-logo-96.png', 'favicon.ico', 'assets/icons/favicon-32.png', 'assets/icons/favicon-64.png']) {
   await access(path.join(root, asset));
 }
 assert.match(config, /https:\/\/draco-code-backend\.vercel\.app/);
@@ -98,3 +98,9 @@ assert.equal((html.match(/M4 6h16M4 12h16M4 18h16/g) || []).length, 1, 'only one
 assert.match(html, /data-mode="project"/);
 for (const ver of [/Project mode/]) assert.match(html, ver);
 console.log('Project-mode shell checks passed.');
+
+assert.doesNotMatch(html + sw, /dracoskill-mark/, 'old logo must not be referenced anywhere');
+assert.ok((html.match(/draco-code-logo(?:-64)?\.png/g) || []).length >= 4, 'product logo is used in the top bar, menu, sign-in dialog and Project mode');
+assert.ok((html.match(/cageddragon-logo-96\.png/g) || []).length >= 3, 'company logo is used in the top bar, footer and menu');
+assert.doesNotMatch(html + sw, /cageddragons-mark/);
+console.log('Logo checks passed.');

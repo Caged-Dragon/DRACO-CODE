@@ -15,6 +15,8 @@ import { validateProject, isSource, extOf, HEADER_EXT, javaMainClass } from './p
 export const RUN_LANGUAGES = ['python', 'javascript', 'java', 'c', 'cpp'];
 export const LABELS = { python: 'Python', javascript: 'JavaScript', java: 'Java', c: 'C', cpp: 'C++' };
 export const ROOT = '/vercel/sandbox';
+const INSTALL_BUDGET_MS = 60_000;          // all package installs for one run share this
+const PACKAGE_SANDBOX_MS = 180_000;        // a sandbox that installs packages lives longer than the default 90 s
 const MAX_OUT = 20_000;
 const RUN_TIMEOUT = Number(process.env.SF_TIMEOUT || 5);
 const COMPILE_TIMEOUT = Number(process.env.SF_COMPILE_TIMEOUT || 25);
@@ -56,35 +58,90 @@ export class RunSession {
   }
 
   async open() {
-    this.sb = await this.factory();
+    this.sb = await this.factory(this.packages.length ? { timeoutMs: PACKAGE_SANDBOX_MS } : undefined);
     await this.sb.writeFiles([{ path: `${ROOT}/${this.file}`, content: Buffer.from(this.code, 'utf8') }]);
     await this.installPackages();
   }
 
+  // Packages are best-effort: one that cannot be installed is reported as a warning and skipped, it never
+  // takes the whole run (or every later run of that language) down. Installs share one time budget.
   async installPackages() {
+    this.warnings = [];
     if (!this.packages.length) return;
-    const sb=this.sb, language=this.language;
-    const specs=this.packages.map(p=>({name:String(p.name||''),version:String(p.version||'')}));
-    if (language==='python') {
-      await sb.update({networkPolicy:{allow:['pypi.org','files.pythonhosted.org']}});
-      const args=['install','--disable-pip-version-check','--no-input','--target',`${ROOT}/.draco-python`,...specs.map(p=>p.name+(p.version?'=='+p.version:''))];
-      const result=await sb.runCommand({cmd:'python3',args:['-m','pip',...args]}); if(result.exitCode!==0) throw new Error('Python package installation failed. Check package names and versions.');
-    } else if (language==='javascript') {
-      await sb.update({networkPolicy:{allow:['registry.npmjs.org']}});
-      const args=['install','--ignore-scripts','--no-audit','--no-fund','--prefix',`${ROOT}/.draco-node`,...specs.map(p=>p.name+(p.version?'@'+p.version:''))];
-      const result=await sb.runCommand({cmd:'npm',args}); if(result.exitCode!==0) throw new Error('JavaScript package installation failed. Check package names and versions.');
-    } else if (language==='java') {
-      await sb.update({networkPolicy:{allow:['repo.maven.apache.org']}}); await sb.runCommand({cmd:'mkdir',args:['-p',`${ROOT}/.draco-java`]});
-      for(const p of specs){const [group,artifact,version]=p.name.split(':');if(!group||!artifact||!version||![group,artifact,version].every(x=>/^[A-Za-z0-9_.-]+$/.test(x)))throw new Error('Java packages must use group:artifact:version coordinates.');const url=`https://repo.maven.apache.org/maven2/${group.replace(/\./g,'/')}/${artifact}/${version}/${artifact}-${version}.jar`;const result=await sb.runCommand({cmd:'curl',args:['-fsSL',url,'-o',`${ROOT}/.draco-java/${artifact}-${version}.jar`]});if(result.exitCode!==0)throw new Error(`Could not download Java dependency ${p.name}.`);}
-    } else if (language==='c'||language==='cpp') {
-      const allowed=language==='c'?new Set(['libsqlite3-dev','libssl-dev','libcurl4-openssl-dev']):new Set(['nlohmann-json3-dev','libboost-dev','libeigen3-dev','libfmt-dev']);
-      if(specs.some(p=>!allowed.has(p.name)))throw new Error('This C/C++ package is not in the supported system-library catalogue.');
-      await sb.update({networkPolicy:{allow:['*.ubuntu.com','archive.ubuntu.com','security.ubuntu.com','ports.ubuntu.com','packages.ubuntu.com']}});
-      await sb.runCommand({cmd:'sed',args:['-i','s|http://|https://|g','/etc/apt/sources.list.d/ubuntu.sources'],sudo:true});
-      const update=await sb.runCommand({cmd:'apt-get',args:['update','-qq'],sudo:true});if(update.exitCode!==0)throw new Error('Could not refresh the C/C++ package catalogue.');
-      const install=await sb.runCommand({cmd:'apt-get',args:['install','-y','--no-install-recommends',...specs.map(p=>p.name)],sudo:true});if(install.exitCode!==0)throw new Error('C/C++ package installation failed.');
+    const sb = this.sb, language = this.language;
+    const specs = this.packages.map((p) => ({ name: String(p.name || ''), version: String(p.version || '') }));
+    const deadline = Date.now() + INSTALL_BUDGET_MS;
+    const left = () => Math.max(1, Math.floor((deadline - Date.now()) / 1000));
+    const warn = (name, reason) => this.warnings.push({ name, reason });
+    const warnAll = (reason) => specs.forEach((p) => warn(p.name, reason));
+    // `timeout` keeps any single install from eating the sandbox's whole lifetime
+    const run = (cmd, args, perSec, extra = {}) => sb.runCommand({ cmd: 'timeout', args: ['-k', '2', String(Math.min(perSec, left())), cmd, ...args], ...extra });
+    const why = (r) => (r.exitCode === 124 || r.exitCode === 137 ? 'timed out while installing' : 'could not be installed (check the name and version)');
+    const allow = async (domains) => {
+      try { await sb.update({ networkPolicy: { allow: domains } }); return true; }
+      catch { warnAll('package installation is not available right now'); return false; }
+    };
+    try {
+      if (language === 'python') {
+        if (await allow(['pypi.org', 'files.pythonhosted.org'])) {
+          const base = ['-m', 'pip', 'install', '--disable-pip-version-check', '--no-input', '--no-cache-dir', '--target', `${ROOT}/.draco-python`];
+          const spec = (p) => p.name + (p.version ? '==' + p.version : '');
+          const all = await run('python3', [...base, ...specs.map(spec)], 45);
+          if (all.exitCode !== 0) {
+            if (specs.length > 1 && left() > 8) {       // find the culprit, keep the good ones
+              for (const p of specs) {
+                if (left() <= 3) { warn(p.name, 'skipped: install time budget used up'); continue; }
+                const one = await run('python3', [...base, spec(p)], 15);
+                if (one.exitCode !== 0) warn(p.name, why(one));
+              }
+            } else warnAll(why(all));
+          }
+        }
+      } else if (language === 'javascript') {
+        if (await allow(['registry.npmjs.org'])) {
+          const base = ['npm', 'install', '--ignore-scripts', '--no-audit', '--no-fund', '--prefix', `${ROOT}/.draco-node`];
+          const spec = (p) => p.name + (p.version ? '@' + p.version : '');
+          const all = await run(base[0], [...base.slice(1), ...specs.map(spec)], 45);
+          if (all.exitCode !== 0) {
+            if (specs.length > 1 && left() > 8) {
+              for (const p of specs) {
+                if (left() <= 3) { warn(p.name, 'skipped: install time budget used up'); continue; }
+                const one = await run(base[0], [...base.slice(1), spec(p)], 15);
+                if (one.exitCode !== 0) warn(p.name, why(one));
+              }
+            } else warnAll(why(all));
+          }
+        }
+      } else if (language === 'java') {
+        if (await allow(['repo.maven.apache.org'])) {
+          await sb.runCommand({ cmd: 'mkdir', args: ['-p', `${ROOT}/.draco-java`] });
+          for (const p of specs) {
+            const [group, artifact, version] = p.name.split(':');
+            if (!group || !artifact || !version || ![group, artifact, version].every((x) => /^[A-Za-z0-9_.-]+$/.test(x))) { warn(p.name, 'must use group:artifact:version coordinates'); continue; }
+            if (left() <= 2) { warn(p.name, 'skipped: install time budget used up'); continue; }
+            const url = `https://repo.maven.apache.org/maven2/${group.replace(/\./g, '/')}/${artifact}/${version}/${artifact}-${version}.jar`;
+            const r = await sb.runCommand({ cmd: 'curl', args: ['-fsSL', '-m', String(Math.min(25, left())), url, '-o', `${ROOT}/.draco-java/${artifact}-${version}.jar`] });
+            if (r.exitCode !== 0) warn(p.name, 'could not be downloaded (check the coordinates)');
+          }
+        }
+      } else if (language === 'c' || language === 'cpp') {
+        const allowed = language === 'c' ? new Set(['libsqlite3-dev', 'libssl-dev', 'libcurl4-openssl-dev']) : new Set(['nlohmann-json3-dev', 'libboost-dev', 'libeigen3-dev', 'libfmt-dev']);
+        const ok = specs.filter((p) => allowed.has(p.name));
+        specs.filter((p) => !allowed.has(p.name)).forEach((p) => warn(p.name, 'is not in the supported system-library catalogue'));
+        if (ok.length && await allow(['*.ubuntu.com', 'archive.ubuntu.com', 'security.ubuntu.com', 'ports.ubuntu.com', 'packages.ubuntu.com'])) {
+          await sb.runCommand({ cmd: 'sed', args: ['-i', 's|http://|https://|g', '/etc/apt/sources.list.d/ubuntu.sources'], sudo: true });
+          const update = await run('apt-get', ['update', '-qq'], 30, { sudo: true });
+          if (update.exitCode !== 0) ok.forEach((p) => warn(p.name, 'the package catalogue could not be refreshed'));
+          else {
+            const install = await run('apt-get', ['install', '-y', '--no-install-recommends', ...ok.map((p) => p.name)], 45, { sudo: true });
+            if (install.exitCode !== 0) ok.forEach((p) => warn(p.name, why(install)));
+          }
+        }
+      }
+    } finally {
+      // Never run user code with network access: if closing the network fails, this must fail loudly.
+      await sb.update({ networkPolicy: 'deny-all' });
     }
-    await sb.update({networkPolicy:'deny-all'});
   }
   async close() {
     try { await this.sb?.stop(); } catch { /* already stopped / expired */ }
@@ -183,6 +240,16 @@ export function compileFailure(c) {
 }
 
 // Single snippet. Returns [result, httpStatus].
+// "Package X could not be installed" lines, shown to the user ahead of the program's own output.
+export function packageWarnings(session) {
+  return (session.warnings || []).map((w) => `Package ${w.name}: ${w.reason}. It was skipped. Remove it in Menu > Languages and packages if you don't need it.`);
+}
+function withWarnings(result, session) {
+  const w = packageWarnings(session);
+  if (!w.length || !result || result.error) return result;
+  return { ...result, warnings: w, stderr: w.join('\n') + '\n' + (result.stderr || '') };
+}
+
 export async function execute(language, code, stdin = '', factory = getFactory(), options = {}) {
   if (!RUN_LANGUAGES.includes(language)) return [{ error: `Unsupported language: ${language}. Supported: ${RUN_LANGUAGES.join(', ')}.` }, 400];
   if (typeof code !== 'string' || !code.trim()) return [{ error: 'No code submitted' }, 400];
@@ -197,15 +264,16 @@ export async function execute(language, code, stdin = '', factory = getFactory()
     if (c && c.error) return [{ error: c.error }, 400];
     if (c && c.exitCode !== 0) {
       if (missingTool(c)) return [{ error: missingMessage(language) }, 503];
-      return [compileFailure(c), 200];
+      return [withWarnings(compileFailure(c), s), 200];
     }
     const r = await s.run(stdin);
     if (missingTool(r)) return [{ error: missingMessage(language) }, 503];
     r.compile = c ? { stdout: c.stdout, stderr: c.stderr, exitCode: c.exitCode, timeMs: c.timeMs } : null;
     r.compileError = false;
-    return [r, 200];
+    return [withWarnings(r, s), 200];
   } catch (e) {
     if (isCapacityError(e)) return [{ error: CAPACITY_MESSAGE, code: 'capacity' }, 503];
+    if (isTimeoutError(e)) return [{ error: TIMEOUT_MESSAGE, code: 'timeout' }, 504];
     return [{ error: `The sandbox service failed: ${e?.message || e}` }, 502];
   } finally {
     await s.close();
@@ -224,7 +292,7 @@ export class ProjectSession extends RunSession {
     this.cls = language === 'java' ? javaMainClass(project.entry, project.files.find((f) => f.path === project.entry).content) : undefined;
   }
   async open() {
-    this.sb = await this.factory();
+    this.sb = await this.factory(this.packages.length ? { timeoutMs: PACKAGE_SANDBOX_MS } : undefined);
     const sources = this.project.files.filter((f) => isSource(this.language, f.path)).map((f) => f.path);
     const files = this.project.files.map((f) => ({ path: `${ROOT}/proj/${f.path}`, content: Buffer.from(f.content, 'utf8') }));
     files.push({ path: `${ROOT}/sources.txt`, content: Buffer.from(sources.join('\n') + '\n', 'utf8') });
@@ -273,15 +341,16 @@ export async function executeProject(language, files, entry, stdin = '', factory
     if (c && c.error) return [{ error: c.error }, 400];
     if (c && c.exitCode !== 0) {
       if (missingTool(c)) return [{ error: missingMessage(language) }, 503];
-      return [compileFailure(c), 200];
+      return [withWarnings(compileFailure(c), s), 200];
     }
     const r = await s.run(stdin);
     if (missingTool(r)) return [{ error: missingMessage(language) }, 503];
     r.compile = c ? { stdout: c.stdout, stderr: c.stderr, exitCode: c.exitCode, timeMs: c.timeMs } : null;
     r.compileError = false; r.entry = entry;
-    return [r, 200];
+    return [withWarnings(r, s), 200];
   } catch (e) {
     if (isCapacityError(e)) return [{ error: CAPACITY_MESSAGE, code: 'capacity' }, 503];
+    if (isTimeoutError(e)) return [{ error: TIMEOUT_MESSAGE, code: 'timeout' }, 504];
     return [{ error: `The sandbox service failed: ${e?.message || e}` }, 502];
   } finally {
     await s.close();
@@ -294,5 +363,10 @@ export const CAPACITY_MESSAGE = 'This site has used up its free run allowance fo
 export function isCapacityError(e) {
   const status = e?.status ?? e?.statusCode ?? e?.response?.status;
   if (status === 429 || status === 402) return true;
-  return /rate.?limit|quota|exceed|too many requests|usage limit|capacity|payment required|\b429\b|\b402\b/i.test(String(e?.message || e));
+  // Deliberately strict: words like "exceeded" also appear in ordinary timeout errors, which are NOT an allowance problem.
+  return /rate.?limit|too many requests|usage limit|quota|payment required|insufficient (?:credits|funds)|\b429\b|\b402\b/i.test(String(e?.message || e));
 }
+export function isTimeoutError(e) {
+  return e?.name === 'TimeoutError' || /time(?:d)?[ -]?out|timeout|deadline|exceeded .*(?:duration|time)|sandbox (?:has )?(?:stopped|expired)/i.test(String(e?.message || e));
+}
+export const TIMEOUT_MESSAGE = 'The sandbox ran out of time. Installing packages can be slow: remove heavy packages from your account (Menu > Languages and packages) or try again.';

@@ -107,5 +107,62 @@
     return out;
   }
 
-  return { LIMITS: LIMITS, PATH_RE: PATH_RE, LANGS: LANGS, LABELS: LABELS, STARTERS: STARTERS, ext: ext, baseName: baseName, parentPath: parentPath, joinPath: joinPath, highlightLang: highlightLang, isSource: isSource, pathError: pathError, buildTree: buildTree, defaultEntry: defaultEntry, parseDiagnostics: parseDiagnostics };
+
+  // ---------- search across project files (literal text) ----------
+  // files: [{path, content}] -> [{path, line, col, text}] (max 300), grouped by file order then line.
+  function searchFiles(files, query, opts) {
+    opts = opts || {}; var out = [], q = String(query || ''); if (!q) return out;
+    var needle = opts.caseSensitive ? q : q.toLowerCase();
+    var list = files.slice().sort(function (a, b) { return a.path < b.path ? -1 : 1; });
+    for (var f = 0; f < list.length; f++) {
+      var lines = String(list[f].content).split('\n');
+      for (var i = 0; i < lines.length; i++) {
+        var hay = opts.caseSensitive ? lines[i] : lines[i].toLowerCase(), from = 0, at;
+        while ((at = hay.indexOf(needle, from)) !== -1) {
+          var from0 = lines[i].length > 200 ? Math.max(0, at - 60) : 0;
+          out.push({ path: list[f].path, line: i + 1, col: at + 1, length: needle.length, start: at - from0, text: lines[i].length > 200 ? lines[i].slice(from0, at + 140) : lines[i] });
+          if (out.length >= 300) return out;
+          from = at + Math.max(1, needle.length);
+        }
+      }
+    }
+    return out;
+  }
+
+  // ---------- upload helpers ----------
+  function sanitizeUploadName(name) {
+    var base = String(name || '').split(/[\\/]/).pop().replace(/[^A-Za-z0-9_.-]+/g, '_').replace(/^[._-]+/, '').slice(0, 120);
+    return base || null;
+  }
+  function looksLikeText(s) { return String(s).indexOf('\u0000') === -1 && String(s).indexOf('\uFFFD') === -1; }
+
+  // ---------- ZIP (store method, UTF-8 names) so a project can be downloaded without any library ----------
+  var CRC_TABLE = (function () { var t = new Uint32Array(256); for (var n = 0; n < 256; n++) { var c = n; for (var k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  function crc32(bytes) { var c = 0xFFFFFFFF; for (var i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+  // files: [{path, content}] -> Uint8Array
+  function makeZip(files, when) {
+    var enc = new TextEncoder(), d = when || new Date();
+    var dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+    var dosDate = (Math.max(0, d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+    var parts = [], central = [], offset = 0;
+    function u16(v) { return [v & 255, (v >>> 8) & 255]; } function u32(v) { return [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255]; }
+    files.forEach(function (f) {
+      var name = enc.encode(f.path), data = enc.encode(f.content), crc = crc32(data);
+      var local = [].concat(u32(0x04034b50), u16(20), u16(0x0800), u16(0), u16(dosTime), u16(dosDate), u32(crc), u32(data.length), u32(data.length), u16(name.length), u16(0));
+      parts.push(new Uint8Array(local), name, data);
+      central.push({ name: name, crc: crc, size: data.length, offset: offset });
+      offset += local.length + name.length + data.length;
+    });
+    var cdStart = offset, cdSize = 0;
+    central.forEach(function (e) {
+      var h = [].concat(u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(0), u16(dosTime), u16(dosDate), u32(e.crc), u32(e.size), u32(e.size), u16(e.name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(e.offset));
+      parts.push(new Uint8Array(h), e.name); cdSize += h.length + e.name.length;
+    });
+    parts.push(new Uint8Array([].concat(u32(0x06054b50), u16(0), u16(0), u16(central.length), u16(central.length), u32(cdSize), u32(cdStart), u16(0))));
+    var total = parts.reduce(function (n, p) { return n + p.length; }, 0), out = new Uint8Array(total), at = 0;
+    parts.forEach(function (p) { out.set(p, at); at += p.length; });
+    return out;
+  }
+
+  return { LIMITS: LIMITS, PATH_RE: PATH_RE, LANGS: LANGS, LABELS: LABELS, STARTERS: STARTERS, ext: ext, baseName: baseName, parentPath: parentPath, joinPath: joinPath, highlightLang: highlightLang, isSource: isSource, pathError: pathError, buildTree: buildTree, defaultEntry: defaultEntry, parseDiagnostics: parseDiagnostics, searchFiles: searchFiles, sanitizeUploadName: sanitizeUploadName, looksLikeText: looksLikeText, crc32: crc32, makeZip: makeZip };
 });
