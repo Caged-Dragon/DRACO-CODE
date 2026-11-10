@@ -103,6 +103,20 @@ function supabaseConfigStatus() {
   };
 }
 
+// Which settings are missing or invalid, by NAME only (never values), so the site owner can fix it in one go.
+function missingSettings(status = supabaseConfigStatus()) {
+  const out = [];
+  if (!status.urlPresent) out.push({ name: 'SUPABASE_URL', problem: `is not set. It must be https://${EXPECTED_SUPABASE_HOST}` });
+  else if (!status.urlMatchesProject) out.push({ name: 'SUPABASE_URL', problem: `must be exactly https://${EXPECTED_SUPABASE_HOST}` });
+  if (!status.anonKeyPresent) out.push({ name: 'SUPABASE_ANON_KEY', problem: 'is not set (Supabase dashboard > Project Settings > API: the publishable / anon key)' });
+  if (!status.backendSecretPresent) out.push({ name: 'CODE_BACKEND_SHARED_SECRET', problem: 'is not set. Use a random secret of at least 32 characters' });
+  else if (!status.backendSecretLengthValid) out.push({ name: 'CODE_BACKEND_SHARED_SECRET', problem: 'is too short: it needs at least 32 characters' });
+  if (!status.rateLimitSecretPresent) out.push({ name: 'CODE_RATE_LIMIT_SECRET', problem: 'is not set. Use a different random secret of at least 32 characters' });
+  else if (!status.rateLimitSecretLengthValid) out.push({ name: 'CODE_RATE_LIMIT_SECRET', problem: 'is too short: it needs at least 32 characters' });
+  return out;
+}
+const NOT_CONFIGURED = () => ({ error: 'Execution service is not configured. Please contact the site operator.', code: 'not-configured', missing: missingSettings() });
+
 function supabaseConfig() {
   const status = supabaseConfigStatus();
   if (!status.ready) return null;
@@ -211,7 +225,7 @@ async function admitRun(req, res) {
 
   const config = supabaseConfig();
   const production = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
-  if (!config && production) return send(res, 503, { error: 'Execution service is not configured. Please contact the site operator.' });
+  if (!config && production) return send(res, 503, NOT_CONFIGURED());
 
   let userContext=null, packages=[];
   if(req.headers?.authorization){try{userContext=await authenticatedUser(req,config);}catch{return send(res,401,{error:'Your sign-in session is invalid. Please sign in again.'});}if(!userContext)return send(res,401,{error:'Sign in to use account features.'});}
@@ -283,7 +297,8 @@ export default async function handler(req, res) {
       return send(res, 200, {
         status: 'ok', service: 'draco-code-execution', backend: 'vercel-sandbox',
         databaseConfigured: databaseConfig.ready,
-        databaseConfig
+        databaseConfig,
+        missing: missingSettings(databaseConfig)
       });
     }
     if (req.method === 'GET' && path === '/sandboxes') {
@@ -296,7 +311,7 @@ export default async function handler(req, res) {
       const version = typeof body.version === 'string' ? body.version : '';
       if (!['python', 'javascript', 'java', 'c', 'cpp'].includes(body.language)) return send(res, 400, { error: 'Unsupported language.' });
       const config = supabaseConfig();
-      if (!config && (process.env.VERCEL === '1' || process.env.NODE_ENV === 'production')) return send(res, 503, { error: 'Execution service is not configured. Please contact the site operator.' });
+      if (!config && (process.env.VERCEL === '1' || process.env.NODE_ENV === 'production')) return send(res, 503, NOT_CONFIGURED());
       let userContext = null;
       try { userContext = req.headers?.authorization ? await authenticatedUser(req, config) : null; } catch { return send(res, 401, { error: 'Your sign-in session is invalid. Please sign in again.' }); }
       if (!userContext) return send(res, 401, { error: 'Sign in to test packages.' });

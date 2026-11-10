@@ -178,6 +178,14 @@
       if (res.status === 404 && p.fallback) { S.running = false; return p.fallback(); }   // older backend without terminal sessions
       if (res.status !== 200 || (!res.json.session && !res.json.done)) {
         S.running = false; var msg = res.json.error || 'The run could not be started.';
+        if (res.json.code === 'not-configured') {   // the SERVER is missing settings: say who can fix it and how
+          var gone = (res.json.missing || []).map(function (m) { return m.name; });
+          sys('[' + msg + ']\n', 'err');
+          sys('[Site owner: the server is missing ' + (gone.length ? gone.join(', ') : 'some settings') + '. Click "How to fix" at the top of the page for the exact steps.]\n', 'warn');
+          status('error', 'Server not set up');
+          if (opts.onFinish) opts.onFinish({ kind: 'error', label: 'Server not set up', httpStatus: res.status, error: msg, text: '' });
+          return;
+        }
         if (res.json.code === 'setup') {          // not an error: the compilers are being prepared for the first time
           sys('[' + msg + ']\n', 'warn');
           if (opts.onFinish) opts.onFinish({ kind: 'warning', label: 'Preparing', setup: true, text: '' });

@@ -6,7 +6,7 @@
   "description": "Draco Code execution API for Vercel: runs code in Vercel Sandbox microVMs",
   "scripts": {
     "snapshot": "node scripts/make-snapshot.mjs",
-    "test": "node test/test.mjs && node test/project.test.mjs && node test/interactive.test.mjs && node test/packages.test.mjs && node test/examples.test.mjs && node test/toolchain-packages.test.mjs",
+    "test": "node test/test.mjs && node test/project.test.mjs && node test/interactive.test.mjs && node test/packages.test.mjs && node test/examples.test.mjs && node test/toolchain-packages.test.mjs && node test/config.test.mjs",
     "test:frontend": "node ../frontend/test/smoke.mjs && node ../frontend/test/project-core.test.mjs && node ../frontend/test/terminal.test.mjs && node ../frontend/test/features-core.test.mjs",
     "test:all": "npm test && npm run test:frontend"
   },

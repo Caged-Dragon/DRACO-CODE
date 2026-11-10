@@ -116,3 +116,13 @@ The site logo is `frontend/assets/draco-code-logo.png` (top bar, menu, sign-in d
 - **First use of Java / C / C++:** if the backend's compiler snapshot has never been built, the backend now starts the one-time setup by itself when a user first needs it (or adds the language). The page shows progress and runs the program automatically when it is ready. Opening `/setup` by hand is no longer required.
 - **Backend:** `POST /packages/check` (sign-in required, rate limited, uses the run quota) tests one package. Installs are best-effort: `pip` is bootstrapped if missing, C/C++ libraries work on `apt` and `dnf` images and are skipped if already in the snapshot, and failures report the actual error line.
 - **Accessibility:** zero axe-core violations (WCAG 2.2 AA) over every main screen in both themes; skip link, page heading and landmarks, keyboard-operable editor tabs, high-contrast tokens (`html[data-contrast="high"]`), reduced-motion and forced-colours support (`frontend/app/a11y.css`).
+
+
+## "Execution service is not configured" (what it means and how to fix it)
+
+The backend refuses to run code (Python and JavaScript included) unless ALL of these settings exist on the **backend** Vercel project: `SUPABASE_URL` (must be exactly `https://gbeurqibcfvquacasofq.supabase.co`), `SUPABASE_ANON_KEY`, `CODE_BACKEND_SHARED_SECRET` (32+ characters) and `CODE_RATE_LIMIT_SECRET` (32+ characters, different from the other one). It fails closed on purpose: without them the run limits cannot be enforced.
+
+- Open `https://<your-backend>/health`: `missing` lists exactly which settings are absent or invalid (names only, never values).
+- The website now shows a **How to fix** button next to the "Needs setup" badge with the same steps, and the terminal names the missing settings.
+- Vercel applies new environment variables only to NEW deployments: add them, then press **Redeploy**.
+- Generate a secret with `openssl rand -base64 48` (run it twice: the two secrets must differ).

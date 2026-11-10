@@ -173,15 +173,19 @@
     $('backend-detail').textContent = detail || `Backend: ${label.toLowerCase()}`;
   }
 
+  let backendMissing = [];
   async function checkBackend() {
     updateConnection('checking', 'Connecting', 'Backend: checking');
     try {
       const response = await fetch(`${BACKEND_URL}/health`, { method: 'GET', cache: 'no-store', signal: AbortSignal.timeout(6500) });
       const health = await response.json();
       if (!response.ok || health.status !== 'ok') throw new Error('Health check failed');
+      backendMissing = Array.isArray(health.missing) ? health.missing : [];
+      $('backend-help-button').hidden = health.databaseConfigured !== false;
       updateConnection(health.databaseConfigured === false ? 'warning' : 'online', health.databaseConfigured === false ? 'Needs setup' : 'Connected', health.databaseConfigured === false ? 'Backend: database configuration missing' : 'Backend: online');
       await checkRuntimes();
     } catch {
+      $('backend-help-button').hidden = true;
       updateConnection('offline', navigator.onLine ? 'Unavailable' : 'Offline', 'Backend: unreachable');
       setRuntimeState(null);
     }
@@ -1032,6 +1036,7 @@
     languages: () => Object.keys(LANGUAGES).map((id) => ({ id, label: LANGUAGES[id].label, available: canUseLanguage(id) })),
     toggleLayout: () => toggleLayout(),
     openMenu, closeMenu,
+    recheckBackend: () => checkBackend(),
     setConnection: updateConnection
   });
 
@@ -1113,6 +1118,7 @@
   });
   $('clear-output-button').addEventListener('click', () => { if (terminal.isRunning()) terminal.clear(); else clearConsole(); });
   $('stop-button').addEventListener('click', () => terminal.stop());
+  $('backend-help-button').addEventListener('click', () => window.DracoFeatures?.openBackendSetup(backendMissing, BACKEND_URL));
   $('copy-output-button').addEventListener('click', async () => {
     const text = output.classList.contains('term-host') ? terminal.text() : output.innerText;
     if (!text || !text.trim() || /Your terminal is ready/.test(text)) { showToast('Nothing to copy yet. Run your program first.'); return; }

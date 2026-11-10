@@ -134,6 +134,34 @@
     setTimeout(function () { done.focus(); }, 20);
   }
 
+  // ---------- server setup guide (for the site owner) ----------
+  function openBackendSetup(missing, backendUrl) {
+    var m = modal({ title: 'Finish setting up the server', wide: true }), b = m.body;
+    b.appendChild(el('p', 'fx-hint', 'Running code is switched off until the server (your backend project on Vercel) has all of its settings. Visitors currently see "Execution service is not configured". This guide is for the site owner.'));
+    var s1 = el('section', 'fx-section'); s1.appendChild(el('h3', null, 'What the server reports as missing'));
+    var ul = el('ul', 'fx-steps');
+    (missing && missing.length ? missing : [{ name: 'Unknown', problem: 'The server did not name a specific setting. Open the health page below to see its status.' }]).forEach(function (x) {
+      var li = el('li'); li.append(el('code', null, x.name), document.createTextNode(' ' + x.problem + '.')); ul.appendChild(li);
+    }); s1.appendChild(ul); b.appendChild(s1);
+    var s2 = el('section', 'fx-section'); s2.appendChild(el('h3', null, 'How to fix it'));
+    var ol = el('ol', 'fx-steps');
+    ['On vercel.com open the BACKEND project (not the website project), then Settings, then Environment Variables.',
+     'Add every setting listed above for Production (and Preview). SUPABASE_URL is your Supabase project address. SUPABASE_ANON_KEY is the publishable key from Supabase, Project Settings, API. The two secrets are random text of 32 or more characters, and they must be different from each other.',
+     'Settings only apply to NEW deployments: open Deployments, choose the latest one, and press Redeploy.',
+     'Come back here and press Check again. The top bar should change from "Needs setup" to "Connected".'].forEach(function (t) { ol.appendChild(el('li', null, t)); });
+    s2.appendChild(ol);
+    s2.appendChild(el('p', 'fx-hint', 'A quick way to make a secret (run it twice, once for each):'));
+    var cmd = el('pre', 'fx-cmd', 'openssl rand -base64 48'); s2.appendChild(cmd); b.appendChild(s2);
+    var foot = el('div', 'fx-actions');
+    var copy = el('button', 'panel-secondary', 'Copy the command'); copy.type = 'button';
+    copy.addEventListener('click', function () { (navigator.clipboard ? navigator.clipboard.writeText('openssl rand -base64 48') : Promise.reject()).then(function () { toast('Command copied.'); }, function () { toast('Select the command and copy it.'); }); });
+    var health = el('a', 'panel-secondary fx-link', 'Open the health page'); health.href = backendUrl + '/health'; health.target = '_blank'; health.rel = 'noopener noreferrer';
+    var again = el('button', 'panel-primary', 'Check again'); again.type = 'button';
+    again.addEventListener('click', function () { m.close(); toast('Checking the server\u2026'); App.recheckBackend(); });
+    foot.append(copy, health, again); b.appendChild(foot);
+    setTimeout(function () { again.focus(); }, 20);
+  }
+
   // ---------- examples gallery ----------
   function openExample(e) {
     if (!App.languages().some(function (l) { return l.id === e.language && l.available; })) { current && current.close(); App.openAccountPanel(); toast('Sign in and add ' + LABEL[e.language] + ' to open this example.'); return; }
@@ -258,5 +286,5 @@
 
   applySettings();
   wire();
-  window.DracoFeatures = { openPalette: openPalette, openSettings: openSettings, openExamples: openExamples, openShortcuts: openShortcuts, openAbout: openAbout, settings: function () { return Object.assign({}, settings); } };
+  window.DracoFeatures = { openBackendSetup: openBackendSetup, openPalette: openPalette, openSettings: openSettings, openExamples: openExamples, openShortcuts: openShortcuts, openAbout: openAbout, settings: function () { return Object.assign({}, settings); } };
 })();

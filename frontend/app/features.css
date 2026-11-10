@@ -106,3 +106,12 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 6px; border: 1px soli
 .language-actions button { min-height: 30px; padding: 0 10px; border: 1px solid var(--seam); border-radius: 8px; background: var(--raised); color: var(--ink); font-size: 12px; font-weight: 600; }
 .language-actions button:hover:not(:disabled) { border-color: var(--ember); }
 .language-actions .use-language { border-color: var(--ember); background: color-mix(in srgb, var(--ember) 16%, var(--raised)); }
+
+/* server setup guide */
+.fx-steps { margin: 0 0 4px; padding-left: 20px; color: var(--ink); font-size: 13.5px; line-height: 1.65; }
+.fx-steps li { margin-bottom: 6px; }
+.fx-steps code { padding: 1px 6px; border-radius: 6px; background: var(--raised); border: 1px solid var(--seam); font: 600 12px var(--font-code); }
+.fx-cmd { margin: 0 0 6px; padding: 10px 14px; border-radius: 8px; background: var(--code-bg); border: 1px solid var(--seam); font: 13px var(--font-code); color: var(--ink); overflow: auto; }
+.fx-link { display: inline-flex; align-items: center; text-decoration: none; }
+.backend-help { border: 1px solid var(--ember); color: var(--ink); background: color-mix(in srgb, var(--ember) 16%, var(--raised)); font-weight: 650; }
+.backend-help[hidden] { display: none; }
