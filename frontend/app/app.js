@@ -187,7 +187,10 @@
     }
   }
 
+  const runtimeInfo = {};                    // id -> { available } as reported by the backend
   function setRuntimeState(sandboxes) {
+    (sandboxes || []).forEach((r) => { runtimeInfo[r.id] = r; });
+    if (typeof renderInstalledLanguages === 'function') renderInstalledLanguages();
     const host = $('runtime-list');
     host.replaceChildren();
     const cap = document.createElement('span');
@@ -422,21 +425,21 @@
   function setLanguage(language) {
     if (!LANGUAGES[language] || !activeProgram || activeProgram.language === language) return;
     if (!canUseLanguage(language)) { languageSelect.value = activeProgram.language; openAccountPanel(); showToast('Sign in and add this language to unlock it.'); return; }
-    if (!window.confirm(`Change this file to ${LANGUAGES[language].label}? Its current source will be kept as-is; it will not be translated.`)) {
-      languageSelect.value = activeProgram.language;
-      return;
+    const meta = LANGUAGES[language], previous = LANGUAGES[activeProgram.language];
+    const mine = editor.value.trim();
+    if (!mine || mine === previous.starter.trim()) {
+      // Nothing of yours to lose: turn this program into a ready-to-run program in the new language.
+      const stem = activeProgram.name.replace(/\.[^.]+$/, '') || 'main';
+      activeProgram.language = language;
+      activeProgram.name = `${stem}${meta.extension}`;
+      activeProgram.code = meta.starter;
+      setActive(activeProgram.id);
+      showToast(`Switched to ${meta.label}. This is a starter program: press Run.`);
+    } else {
+      // Your code is kept: the new language gets its own program (Python source cannot run as Java).
+      activeProgram.code = editor.value;
+      createProgram(language, { toast: `Started a new ${meta.label} program. Your ${previous.label} program is still in My programs.` });
     }
-    activeProgram.language = language;
-    const meta = LANGUAGES[language];
-    const stem = activeProgram.name.replace(/\.[^.]+$/, '') || 'main';
-    activeProgram.name = `${stem}${meta.extension}`;
-    editorApi.setLang(language);
-    $('status-language').textContent = meta.label;
-    $('file-type-dot').className = `file-type-dot ${language}`;
-    persist();
-    renderProgramList();
-    updateEditorMeta();
-    showToast(`Language set to ${meta.label}. Source was preserved.`);
   }
 
   function resetProgram() {
@@ -529,8 +532,8 @@
   };
   const LABELS = { python:'Python', javascript:'JavaScript', java:'Java', c:'C', cpp:'C++' };
   function canUseLanguage(language) { return language === 'python' || language === 'javascript' || installedLanguages.has(language); }
-  function openAccountPanel() { $('account-panel').classList.add('open');$('account-panel').setAttribute('aria-hidden','false');$('account-panel-scrim').hidden=false;closeMenu();renderPackageControls(); }
-  function closeAccountPanel() { $('account-panel').classList.remove('open');$('account-panel').setAttribute('aria-hidden','true');$('account-panel-scrim').hidden=true; }
+  function openAccountPanel() { $('account-panel').classList.add('open');$('account-panel').removeAttribute('inert');$('account-panel').setAttribute('aria-hidden','false');$('account-panel-scrim').hidden=false;closeMenu();renderPackageControls(); }
+  function closeAccountPanel() { $('account-panel').classList.remove('open');$('account-panel').setAttribute('inert','');$('account-panel').setAttribute('aria-hidden','true');$('account-panel-scrim').hidden=true; }
   function updateLanguageAccess() {
     [...languageSelect.options].forEach(option=>{option.disabled=!canUseLanguage(option.value);option.textContent=LABELS[option.value]+(option.disabled?' · Sign in to unlock':'');});
     if(activeProgram&&!canUseLanguage(activeProgram.language)){const fallback=state.programs.find(p=>canUseLanguage(p.language));if(fallback)setActive(fallback.id);}
@@ -542,10 +545,62 @@
     if(langs.error)throw langs.error;if(packs.error)throw packs.error;
     installedLanguages=new Set((langs.data||[]).map(x=>x.language));installedPackages=packs.data||[];updateLanguageAccess();
   }
+  // ---- is a language really usable? (compiler snapshot) ----
+  const setupWatch = { active: false, language: null };
+  function languageReadiness(language) {
+    if (language === 'python' || language === 'javascript') return { state: 'ready', text: 'Ready' };
+    if (setupWatch.active) return { state: 'preparing', text: 'Preparing the compilers (one time, about 5 minutes)' };
+    if (runtimeInfo[language]?.available === false) return { state: 'missing', text: 'Needs the one-time compiler setup' };
+    return { state: 'ready', text: 'Ready' };
+  }
+  function useLanguage(language) {
+    closeAccountPanel();
+    if (activeProgram?.language === language && !editor.value.trim()) { editor.focus(); return; }
+    if (activeProgram?.language === language) { createProgram(language, { toast: `Started a new ${LABELS[language]} program.` }); return; }
+    languageSelect.value = language;
+    setLanguage(language);
+  }
+  // The compilers (Java, C, C++) are installed once into a saved image. Start that by itself and follow its progress.
+  async function prepareRuntime(language) {
+    if (!BACKEND_URL || setupWatch.active) return;
+    setupWatch.active = true; setupWatch.language = language; renderInstalledLanguages();
+    try {
+      let status = await (await fetch(`${BACKEND_URL}/setup/start`, { method: 'POST', cache: 'no-store', signal: AbortSignal.timeout(30000) })).json();
+      const t0 = Date.now();
+      while ((status.state === 'installing' || status.state === 'saving') && Date.now() - t0 < 15 * 60_000) {
+        await new Promise((resolve) => setTimeout(resolve, 6000));
+        try { status = await (await fetch(`${BACKEND_URL}/setup/status`, { cache: 'no-store', signal: AbortSignal.timeout(20000) })).json(); } catch { /* keep trying */ }
+      }
+      setupWatch.active = false;
+      if (status.state === 'done') { await checkRuntimes(); showToast(`${LABELS[language]} is ready. Press "Use ${LABELS[language]}" in the account panel.`); }
+      else showToast(`The compiler setup did not finish${status.message ? ': ' + status.message : ''}. Open ${BACKEND_URL}/setup for details.`);
+    } catch { showToast('Could not reach the backend to prepare the compilers.'); }
+    finally { setupWatch.active = false; renderInstalledLanguages(); }
+  }
   function renderInstalledLanguages() {
-    const host=$('installed-language-list');if(!host)return;host.replaceChildren();
-    ['python','javascript',...installedLanguages].forEach(language=>{const row=document.createElement('div');row.className='installed-row';const name=document.createElement('span');name.textContent=LABELS[language];const state=document.createElement('small');state.textContent=(language==='python'||language==='javascript')?'Included by default':'Added to your account';row.append(name,state);host.append(row);});
-    document.querySelectorAll('[data-add-language]').forEach(button=>{const language=button.dataset.addLanguage,added=installedLanguages.has(language);button.disabled=added;button.querySelector('b').textContent=added?'✓':'＋';button.querySelector('small').textContent=added?'Added to account':LABELS[language]+' compiler';});
+    const host = $('installed-language-list'); if (!host) return; host.replaceChildren();
+    ['python', 'javascript', ...installedLanguages].forEach((language) => {
+      const row = document.createElement('div'); row.className = 'installed-row language-row';
+      const info = document.createElement('div'); info.className = 'language-info';
+      const name = document.createElement('span'); name.textContent = LABELS[language];
+      const ready = languageReadiness(language), state = document.createElement('small');
+      state.className = `language-state status-${ready.state}`;
+      state.textContent = `${language === 'python' || language === 'javascript' ? 'Included by default' : 'Added to your account'}. ${ready.text}`;
+      info.append(name, state);
+      const actions = document.createElement('div'); actions.className = 'language-actions';
+      const use = document.createElement('button'); use.type = 'button'; use.className = 'use-language'; use.textContent = `Use ${LABELS[language]}`;
+      use.addEventListener('click', () => useLanguage(language)); actions.append(use);
+      if (ready.state === 'missing') {
+        const setup = document.createElement('button'); setup.type = 'button'; setup.className = 'use-language'; setup.textContent = 'Set up now';
+        setup.addEventListener('click', () => prepareRuntime(language)); actions.append(setup);
+      }
+      row.append(info, actions); host.append(row);
+    });
+    document.querySelectorAll('[data-add-language]').forEach((button) => {
+      const language = button.dataset.addLanguage, added = installedLanguages.has(language);
+      button.disabled = added; button.querySelector('b').textContent = added ? '\u2713' : '+';
+      button.querySelector('small').textContent = added ? 'Added to account' : LABELS[language] + ' compiler';
+    });
   }
   function renderPackageControls() {
     const select=$('package-language');if(!select)return;const available=['python','javascript',...installedLanguages],previous=available.includes(select.value)?select.value:'python';select.replaceChildren();
@@ -554,10 +609,48 @@
     (PACKAGE_CATALOG[select.value]||[]).forEach(name=>{const button=document.createElement('button');button.type='button';button.className='package-chip';button.textContent=name;button.addEventListener('click',()=>{$('package-name').value=name;$('package-name').focus();});suggestions.append(button);});
     renderInstalledPackages();
   }
+  // ---- packages: test each one right after adding it, so a broken package is found now, not when you run code ----
+  const packageStatus = new Map();           // "lang:name@version" -> { state, reason }
+  const pkgKey = (p) => `${p.language}:${p.package_name}@${p.package_version || ''}`;
+  async function checkInstalledPackage(p) {
+    if (!BACKEND_URL || !accountSession?.access_token) return;
+    const key = pkgKey(p);
+    packageStatus.set(key, { state: 'checking' }); renderInstalledPackages();
+    try {
+      const response = await fetch(`${BACKEND_URL}/packages/check`, {
+        method: 'POST', cache: 'no-store', signal: AbortSignal.timeout(58000),
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accountSession.access_token}` },
+        body: JSON.stringify({ language: p.language, name: p.package_name, version: p.package_version || '' })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 404) packageStatus.set(key, { state: 'unknown', reason: 'Testing needs the latest backend version. Deploy it, then press Test.' });
+      else if (response.ok && data.ok) packageStatus.set(key, { state: 'ok' });
+      else if (response.ok && data.pending) { packageStatus.set(key, { state: 'pending', reason: 'Waiting for the one-time compiler setup to finish, then test again.' }); prepareRuntime(p.language); }
+      else packageStatus.set(key, { state: 'bad', reason: data.reason || data.error || 'The test could not run.' });
+    } catch (error) {
+      packageStatus.set(key, { state: 'unknown', reason: error?.name === 'TimeoutError' ? 'The test took too long. Try again.' : 'Could not reach the backend to test it.' });
+    }
+    renderInstalledPackages();
+  }
   function renderInstalledPackages() {
-    const host=$('installed-package-list');if(!host)return;host.replaceChildren();const language=$('package-language').value,list=installedPackages.filter(p=>p.language===language);
-    if(!list.length){const empty=document.createElement('p');empty.className='installed-empty';empty.textContent='No packages added for this language yet.';host.append(empty);return;}
-    list.forEach(p=>{const row=document.createElement('div');row.className='installed-row';const name=document.createElement('span');name.textContent=p.package_name+(p.package_version?'@'+p.package_version:'');const remove=document.createElement('button');remove.type='button';remove.textContent='Remove';remove.addEventListener('click',()=>removePackage(p));row.append(name,remove);host.append(row);});
+    const host = $('installed-package-list'); if (!host) return; host.replaceChildren();
+    const language = $('package-language').value, list = installedPackages.filter((p) => p.language === language);
+    if (!list.length) { const empty = document.createElement('p'); empty.className = 'installed-empty'; empty.textContent = 'No packages added for this language yet.'; host.append(empty); return; }
+    list.forEach((p) => {
+      const row = document.createElement('div'); row.className = 'installed-row package-row';
+      const info = document.createElement('div'); info.className = 'package-info';
+      const name = document.createElement('span'); name.textContent = p.package_name + (p.package_version ? '@' + p.package_version : '');
+      const st = packageStatus.get(pkgKey(p)), chip = document.createElement('small'); chip.setAttribute('role', 'status');
+      chip.className = `package-state status-${st?.state || 'untested'}`;
+      chip.textContent = !st ? 'Not tested yet' : st.state === 'checking' ? 'Testing\u2026' : st.state === 'ok' ? '\u2713 Works' : st.state === 'bad' ? `\u2717 ${st.reason} It is skipped when you run code.` : st.reason;
+      info.append(name, chip);
+      const actions = document.createElement('div'); actions.className = 'language-actions';
+      const test = document.createElement('button'); test.type = 'button'; test.textContent = 'Test'; test.setAttribute('aria-label', `Test ${p.package_name}`); test.disabled = st?.state === 'checking';
+      test.addEventListener('click', () => checkInstalledPackage(p));
+      const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Remove'; remove.setAttribute('aria-label', `Remove ${p.package_name}`);
+      remove.addEventListener('click', () => removePackage(p));
+      actions.append(test, remove); row.append(info, actions); host.append(row);
+    });
   }
   // Turn database rule violations into plain sentences.
   function accountDbMessage(error, fallback) {
@@ -572,7 +665,7 @@
   async function addLanguage(language) {
     if(!accountUser){openAccountPanel();$('account-email').focus();showToast('Create an account to add languages.');return;}
     if(!['java','c','cpp'].includes(language)||accountBusy||installedLanguages.has(language))return;accountBusy=true;
-    try{const {error}=await supabaseClient.from('draco_user_languages').insert({user_id:accountUser.id,language});if(error)throw error;await refreshAccountData();showToast(LABELS[language]+' added to your account.');}
+    try{const {error}=await supabaseClient.from('draco_user_languages').insert({user_id:accountUser.id,language});if(error)throw error;await refreshAccountData();showToast(LABELS[language]+' added. Press "Use '+LABELS[language]+'" in the account panel to start a program.');if(runtimeInfo[language]?.available===false)prepareRuntime(language);}
     catch(e){showToast(accountDbMessage(e,'Could not add this language. Please try again.'));}finally{accountBusy=false;}
   }
   async function addPackage() {
@@ -588,7 +681,7 @@
     if(version&&!/^[A-Za-z0-9.+_-]{1,80}$/.test(version)){showToast('Version contains unsupported characters.');return;}
     if(installedPackages.some(p=>p.language===language&&p.package_name.toLowerCase()===name.toLowerCase())){showToast('That package is already on your account.');return;}
     accountBusy=true;$('account-add-package').disabled=true;
-    try{const {error}=await supabaseClient.from('draco_user_packages').insert({user_id:accountUser.id,language,package_name:name,package_version:version});if(error)throw error;$('package-name').value='';$('package-version').value='';await refreshAccountData();showToast(name+' added. It is installed automatically when you run code. If it cannot be installed, the run still works and tells you why.');}
+    try{const {error}=await supabaseClient.from('draco_user_packages').insert({user_id:accountUser.id,language,package_name:name,package_version:version});if(error)throw error;$('package-name').value='';$('package-version').value='';await refreshAccountData();showToast(name+' added. Testing it now\u2026'),checkInstalledPackage({language,package_name:name,package_version:version});}
     catch(e){showToast(accountDbMessage(e,'Could not add this package. Please try again.'));}finally{accountBusy=false;$('account-add-package').disabled=false;}
   }
   async function removePackage(p) {
@@ -819,16 +912,18 @@
     if (accountUser) {
       const email = accountUser.email || 'Account';
       label.textContent = email.split('@')[0];
-      avatar.textContent = email.slice(0, 1).toUpperCase();
+      avatar.textContent = '';
+      avatar.dataset.initial = email.slice(0, 1).toUpperCase();
       avatar.classList.add('has-initial');
       button.classList.add('signed-in');
       button.title = 'Account, languages and packages';
-      button.setAttribute('aria-label', `Account ${email}. Open account panel`);
+      button.setAttribute('aria-label', `${label.textContent}, open account panel`);
       $('menu-foot').textContent = `Signed in as ${email}`;
       $('menu-project-badge').hidden = true;
     } else {
       label.textContent = 'Sign in';
       avatar.innerHTML = AVATAR_SVG;
+      delete avatar.dataset.initial;
       avatar.classList.remove('has-initial');
       button.classList.remove('signed-in');
       button.title = 'Sign in or create an account';
@@ -893,6 +988,8 @@
     $('menu-compiler').classList.toggle('active', next === 'compiler');
     $('menu-project').classList.toggle('active', next === 'project');
     if (!options.restoring) { try { localStorage.setItem(MODE_KEY, next); } catch { /* optional */ } }
+    $('page-title').textContent = next === 'project' ? 'Draco Code Project mode' : 'Draco Code online compiler';
+    $('skip-link').textContent = next === 'project' ? 'Skip to the file editor' : 'Skip to the editor';
     document.dispatchEvent(new CustomEvent('draco:mode', { detail: { mode: next } }));
   }
   function resumePending() {
@@ -902,6 +999,12 @@
   function finishRestore() {
     if (getMode() === 'project' && !accountUser) setMode('compiler', { restoring: true });
   }
+
+  $('skip-link').addEventListener('click', (event) => {
+    event.preventDefault();
+    const target = getMode() === 'project' ? document.querySelector('.ide-editor-host.active textarea') || $('ide-tree') : editor;
+    if (target) target.focus();
+  });
 
   window.DracoCore = Object.freeze({
     client: supabaseClient,
@@ -958,7 +1061,7 @@
     const split = selected === 'split';
     label.textContent = split ? 'Split view' : 'Stacked view';
     button.title = split ? 'Switch to stacked layout' : 'Switch to split layout';
-    button.setAttribute('aria-label', button.title);
+    button.setAttribute('aria-label', `${label.textContent}. ${button.title}`);   // starts with the visible text
     button.setAttribute('aria-pressed', String(split));
 
     try {

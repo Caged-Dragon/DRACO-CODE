@@ -1,8 +1,8 @@
 // Draco Code execution API. User programs run only on isolated Vercel Sandbox microVMs.
 // Routes: GET /health, GET /sandboxes, GET /setup, GET /setup/status,
-//        POST /setup/start, GET /selfcheck, POST /execute.
+//        POST /setup/start, GET /selfcheck, POST /execute, POST /session/*, POST /packages/check.
 import { createHmac, randomUUID } from 'node:crypto';
-import { execute, executeProject } from '../lib/runner.js';
+import { execute, executeProject, checkPackage } from '../lib/runner.js';
 import { startSession, pollSession, sendInput, sendEof, stopSession } from '../lib/interactive.js';
 import { describe } from '../lib/status.js';
 import { setupPage, startSetup, setupStatus } from '../lib/toolchain.js';
@@ -288,6 +288,33 @@ export default async function handler(req, res) {
     }
     if (req.method === 'GET' && path === '/sandboxes') {
       return send(res, 200, await describe(undefined, { probe: u.searchParams.get('probe') === '1' }));
+    }
+    if (path === '/packages/check' && req.method === 'POST') {
+      // Test ONE package the way a run would install it, so a broken package is found when it is added, not when you run code.
+      const body = bodyObject(req);
+      if (!body || typeof body.language !== 'string' || typeof body.name !== 'string') return send(res, 400, { error: 'Expected language and name.' });
+      const version = typeof body.version === 'string' ? body.version : '';
+      if (!['python', 'javascript', 'java', 'c', 'cpp'].includes(body.language)) return send(res, 400, { error: 'Unsupported language.' });
+      const config = supabaseConfig();
+      if (!config && (process.env.VERCEL === '1' || process.env.NODE_ENV === 'production')) return send(res, 503, { error: 'Execution service is not configured. Please contact the site operator.' });
+      let userContext = null;
+      try { userContext = req.headers?.authorization ? await authenticatedUser(req, config) : null; } catch { return send(res, 401, { error: 'Your sign-in session is invalid. Please sign in again.' }); }
+      if (!userContext) return send(res, 401, { error: 'Sign in to test packages.' });
+      if (!validatedPackages(body.language, [{ language: body.language, package_name: body.name, package_version: version }]).length) return send(res, 400, { error: 'That package name or version is not supported for this language.' });
+      if (!['python', 'javascript'].includes(body.language)) {
+        let rows; try { rows = await userRows('draco_user_languages', userContext.user.id, userContext.token, config, 'language'); } catch { return send(res, 503, { error: 'Could not verify your installed languages. Please retry.' }); }
+        if (!rows.some((r) => r.language === body.language)) return send(res, 403, { error: 'Add this language to your account first.' });
+      }
+      if (limited('pkgcheck:' + userContext.user.id, 10, 60_000)) return send(res, 429, { error: 'You can test 10 packages a minute. Please wait a little.' });
+      if (config) {
+        try {
+          const quota = await callSupabaseRpc('code_consume_run', { p_backend_secret: config.backendSecret, p_fingerprint_hash: requestFingerprint(req, config.fingerprintSecret), p_limit: RUN_LIMIT, p_window_seconds: RUN_WINDOW_SECONDS }, config);
+          const row = Array.isArray(quota) ? quota[0] : quota;
+          if (!row || row.is_allowed !== true) return send(res, 429, { error: 'Run limit reached. Please wait before testing another package.' });
+        } catch { return send(res, 503, { error: 'The execution service could not verify its run limit. Please retry shortly.' }); }
+      }
+      const [result, status] = await checkPackage(body.language, { name: body.name, version });
+      return send(res, status, result);
     }
     if (path.startsWith('/session/') && req.method === 'POST') {
       const ip = String(req.headers?.['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';

@@ -1,0 +1,70 @@
+/* Accessibility layer: contrast fixes, target sizes, focus, skip link, reduced motion, high contrast, forced colours. */
+:root { --on-err: #fff; }
+:root[data-theme="dark"] { --on-err: #1B0A12; }
+
+/* Primary buttons use the theme's own "text on accent" colour (white on gold is only 2.2:1). */
+.panel-primary { color: var(--on-ember); }
+.ide-count { color: var(--on-err); }
+.ide-modal-actions .panel-primary.danger { background: var(--err); border-color: var(--err); color: var(--on-err); }
+
+/* Line numbers and small badges must be readable too. */
+.editor-host .code-gutter, .code-gutter { color: var(--ink-faint); }
+.tree-entry { color: var(--ink); background: color-mix(in srgb, var(--ember) 24%, transparent); border-color: var(--ember); }
+
+/* Small text is hard to read: nothing in the side panels below 12px. */
+.account-panel, .account-panel label, .account-panel small, .account-panel .account-message { font-size: 12.5px; }
+.panel-primary, .panel-secondary { font-size: 12.5px; min-height: 38px; }
+.guest-access-note strong, .guest-access-note span, .account-user-card strong { font-size: 12.5px; }
+.account-user-card span:not(.account-avatar) { font-size: 12px; }
+
+/* Touch / pointer targets: at least 24px everywhere, 44px for the primary controls on phones. */
+.ide-tab-close { width: 24px; height: 24px; }
+.ide-row-actions button, .ide-side-actions button, .ide-tab-actions button, .ide-panel-actions button { min-width: 24px; min-height: 24px; }
+@media (pointer: coarse) {
+  .icon-button, .quiet-button, .ide-act, .ide-tab-actions button, .ide-panel-actions button, .ide-side-actions button { min-width: 44px; min-height: 44px; }
+  .tree-row { min-height: 40px; }
+  .ide-row-actions button { min-width: 36px; min-height: 36px; }
+  .menu-item { min-height: 52px; }
+  .fx-choice { min-height: 44px; }
+  .ide-tab-close { width: 32px; height: 32px; }
+}
+
+/* Editor tabs: the tab is a button, the close control is a sibling (no nested interactive controls). */
+.ide-tab { padding: 0 4px 0 0; }
+.ide-tab-main { display: flex; align-items: center; gap: 8px; height: 100%; padding: 0 0 0 13px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; white-space: nowrap; }
+.ide-tab-main:focus-visible { outline-offset: -3px; }
+
+/* Skip link and screen-reader-only text */
+.skip-link { position: fixed; z-index: 120; left: 12px; top: -64px; padding: 10px 16px; border-radius: 10px; background: var(--ember); color: var(--on-ember); font-weight: 700; text-decoration: none; box-shadow: var(--shadow); transition: top .15s; }
+.skip-link:focus { top: 10px; }
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+/* A clearly visible keyboard focus everywhere (never removed) */
+:focus-visible { outline: 3px solid var(--quench); outline-offset: 2px; border-radius: 4px; }
+.term-input:focus-visible, .fx-pal-input:focus-visible, .code-input:focus-visible, textarea:focus-visible { outline-offset: -2px; }
+
+/* Respect the system "reduce motion" setting (and our own Settings switch) */
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
+:root[data-motion="reduce"] *, :root[data-motion="reduce"] *::before, :root[data-motion="reduce"] *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+
+/* High contrast: stronger text, borders and focus; works on top of either theme. */
+:root[data-contrast="high"][data-theme="light"] { --ground: #FFFFFF; --panel: #FFFFFF; --raised: #F4EBD0; --seam: #2A1F08; --ink: #000000; --ink-dim: #1E1604; --ink-faint: #3B2D0B; --ember: #B07800; --ember-hover: #8A5A00; --on-ember: #FFFFFF; --ember-hot: #6B4600; --quench: #4A3000; --code-bg: #FFFFFF; --code-sel: rgba(176,120,0,.45); --tk-com: #4A3F22; }
+:root[data-contrast="high"][data-theme="dark"] { --ground: #000000; --panel: #0A0612; --raised: #1B1230; --seam: #D9CCFF; --ink: #FFFFFF; --ink-dim: #F0EBFA; --ink-faint: #D9CFF2; --ember: #A78BFA; --ember-hover: #C4B5FD; --on-ember: #0A0612; --ember-hot: #D8CCFF; --quench: #FFE066; --code-bg: #000000; --code-sel: rgba(167,139,250,.55); --tk-com: #C9BFE6; }
+:root[data-contrast="high"] { --topbar: var(--panel); --sidebar: var(--panel); }
+:root[data-contrast="high"] * { border-color: var(--seam); }
+:root[data-contrast="high"] :focus-visible { outline-width: 4px; }
+
+/* Windows High Contrast / forced colours: let the system palette win, keep shapes visible */
+@media (forced-colors: active) {
+  .panel-primary, .run-button, .fx-choice.on, .fx-pal-item.active { border: 2px solid ButtonText; forced-color-adjust: none; background: Highlight; color: HighlightText; }
+  .term-host { border: 1px solid CanvasText; }
+  :focus-visible { outline: 3px solid Highlight; }
+}
+
+/* avatar initial is generated content so the button's visible text is just the name */
+.signin-avatar.has-initial::before { content: attr(data-initial); }
+.ide-project-lang { color: var(--ink-dim); }
+.ide-status .ok { color: color-mix(in srgb, var(--moss) 62%, var(--ink)); }
+.ide-status .bad { color: color-mix(in srgb, var(--err) 70%, var(--ink)); }
+.ide-status .warn, .ide-status .busy { color: color-mix(in srgb, var(--brass) 65%, var(--ink)); }
+[tabindex="0"].console-output:focus-visible, .ide-panel-body[tabindex="0"]:focus-visible { outline-offset: -3px; }

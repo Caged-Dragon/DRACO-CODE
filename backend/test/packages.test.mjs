@@ -39,11 +39,11 @@ await t('Python: one bad package -> the program still runs, only the bad one is 
 });
 await t('Python: all packages good -> no warnings, one install command', async () => {
   const log = fresh(); const [r, s] = await R.execute('python', 'print(1)', '', pkgFactory(log), { packages: [{ name: 'a', version: '1.0' }, { name: 'b', version: '' }] });
-  assert.equal(s, 200); assert.equal(r.warnings, undefined); assert.equal(log.installs.length, 1); assert.match(log.installs[0], /a==1\.0 b/);
+  assert.equal(s, 200); assert.equal(r.warnings, undefined); const real = log.installs.filter((x) => /pip install/.test(x)); assert.equal(real.length, 1); assert.match(real[0], /a==1\.0 b/);
 });
 await t('Python: single bad package is reported without pointless retries', async () => {
   const log = fresh(); const [r] = await R.execute('python', 'print(1)', '', pkgFactory(log), { packages: [{ name: 'badpkg', version: '' }] });
-  assert.equal(r.exitCode, 0); assert.equal(r.warnings.length, 1); assert.equal(log.installs.length, 1);
+  assert.equal(r.exitCode, 0); assert.equal(r.warnings.length, 1); assert.equal(log.installs.filter((x) => /pip install/.test(x)).length, 1);
 });
 await t('Python: a timed-out install is reported as such', async () => {
   const log = fresh(); const [r] = await R.execute('python', 'print(1)', '', pkgFactory(log), { packages: [{ name: 'slowpkg', version: '' }] });

@@ -11,7 +11,7 @@ import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { Sandbox } from '@vercel/sandbox';
 import {
   RunSession, ProjectSession, ROOT, getFactory, compileFailure, missingTool, missingMessage,
-  isCapacityError, isTimeoutError, CAPACITY_MESSAGE, TIMEOUT_MESSAGE, packageWarnings, RUN_LANGUAGES, MAX_CODE, MAX_STDIN,
+  isCapacityError, isTimeoutError, CAPACITY_MESSAGE, TIMEOUT_MESSAGE, packageWarnings, toolchainGuard, RUN_LANGUAGES, MAX_CODE, MAX_STDIN,
 } from './runner.js';
 import { validateProject } from './project.js';
 
@@ -91,6 +91,7 @@ export function runnerScript() {
 // body: { language, code } or { language, files, entry }. Returns [json, httpStatus].
 export async function startSession(language, source, stdin = '', options = {}) {
   if (!RUN_LANGUAGES.includes(language)) return [{ error: 'Unsupported language.' }, 400];
+  { const need = await toolchainGuard(language, options.factory || getFactory()); if (need) return need; }
   if ((stdin || '').length > MAX_STDIN) return [{ error: 'Input is too large (100 KB max).' }, 413];
   const name = `draco-${randomUUID()}`;
   const base = options.factory || getFactory();

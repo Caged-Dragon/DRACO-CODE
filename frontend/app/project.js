@@ -446,18 +446,27 @@
 
   function renderTabs() {
     var host = $('ide-tabs'); host.replaceChildren();
-    S.tabs.forEach(function (t) {
-      var same = S.tabs.filter(function (o) { return core.baseName(o.path) === core.baseName(t.path); }).length > 1;
-      var tab = el('div', 'ide-tab' + (t.path === S.active ? ' active' : '')); tab.setAttribute('role', 'tab'); tab.setAttribute('aria-selected', String(t.path === S.active)); tab.tabIndex = 0; tab.title = t.path;
+    var hasActive = S.tabs.some(function (t) { return t.path === S.active; });
+    S.tabs.forEach(function (t, i) {
+      var same = S.tabs.filter(function (o) { return core.baseName(o.path) === core.baseName(t.path); }).length > 1, active = t.path === S.active;
+      // wrapper is presentational; the tab itself is a button and the close control is its SIBLING (no nested interactive controls)
+      var wrap = el('div', 'ide-tab' + (active ? ' active' : ''));
+      var tab = el('button', 'ide-tab-main'); tab.type = 'button'; if (active) tab.setAttribute('aria-current', 'true'); tab.tabIndex = active || (!hasActive && i === 0) ? 0 : -1; tab.title = t.path; tab.dataset.path = t.path;
       tab.appendChild(el('span', 'tree-dot ' + core.highlightLang(t.path))); tab.appendChild(el('span', 'ide-tab-name', core.baseName(t.path)));
       if (same && core.parentPath(t.path)) tab.appendChild(el('span', 'ide-tab-dir', core.parentPath(t.path)));
-      var x = el('button', 'ide-tab-close' + (isDirty(t) ? ' dirty' : '')); x.type = 'button'; x.setAttribute('aria-label', 'Close ' + t.path); x.appendChild(svg(ICON.close));
+      if (isDirty(t)) { var sr = el('span', 'sr-only', ' (unsaved changes)'); tab.appendChild(sr); }
+      var x = el('button', 'ide-tab-close' + (isDirty(t) ? ' dirty' : '')); x.type = 'button'; x.setAttribute('aria-label', 'Close ' + t.path + (isDirty(t) ? ' (unsaved changes, will be saved)' : '')); x.appendChild(svg(ICON.close));
       x.addEventListener('click', function (e) { e.stopPropagation(); closeTab(t.path); });
-      tab.appendChild(x);
       tab.addEventListener('click', function () { activate(t.path); });
-      tab.addEventListener('auxclick', function (e) { if (e.button === 1) { e.preventDefault(); closeTab(t.path); } });
-      tab.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(t.path); } });
-      host.appendChild(tab);
+      tab.addEventListener('keydown', function (e) {
+        var idx = S.tabs.indexOf(t), go = null;
+        if (e.key === 'ArrowRight') go = S.tabs[(idx + 1) % S.tabs.length]; else if (e.key === 'ArrowLeft') go = S.tabs[(idx - 1 + S.tabs.length) % S.tabs.length];
+        else if (e.key === 'Home') go = S.tabs[0]; else if (e.key === 'End') go = S.tabs[S.tabs.length - 1];
+        else if (e.key === 'Delete') { e.preventDefault(); closeTab(t.path); return; }
+        if (go) { e.preventDefault(); activate(go.path, true); S.focusTree = false; var cur = $('ide-tabs').querySelector('.ide-tab-main[aria-current="true"]'); if (cur) cur.focus(); }
+      });
+      wrap.addEventListener('auxclick', function (e) { if (e.button === 1) { e.preventDefault(); closeTab(t.path); } });
+      wrap.append(tab, x); host.appendChild(wrap);
     });
     setSaveState();
   }
@@ -504,7 +513,8 @@
   function initResizer() {
     var main = $('ide-main'), handle = $('ide-resizer'), saved = parseInt(safeGet(PANEL_KEY), 10);
     if (saved >= 90) main.style.setProperty('--panel-h', saved + 'px');
-    function setH(h) { var max = main.clientHeight - 150; h = Math.max(90, Math.min(h, max)); main.style.setProperty('--panel-h', h + 'px'); return h; }
+    setTimeout(function () { setH(parseInt(getComputedStyle(main).getPropertyValue('--panel-h'), 10) || 240); }, 0);
+    function setH(h) { var max = main.clientHeight - 150; h = Math.max(90, Math.min(h, max)); main.style.setProperty('--panel-h', h + 'px'); handle.setAttribute('aria-valuemax', String(Math.max(90, max))); handle.setAttribute('aria-valuenow', String(h)); handle.setAttribute('aria-valuetext', h + ' pixels tall'); return h; }
     handle.addEventListener('pointerdown', function (e) {
       e.preventDefault(); handle.setPointerCapture(e.pointerId); handle.classList.add('drag');
       function move(ev) { var r = main.getBoundingClientRect(); setH(r.bottom - ev.clientY - 0); }

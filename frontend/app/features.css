@@ -93,3 +93,16 @@ kbd { display: inline-block; min-width: 22px; padding: 2px 6px; border: 1px soli
   .fx-scrim { padding-top: 6vh; }
 }
 @media (prefers-reduced-motion: reduce) { .fx-scrim { backdrop-filter: none; } }
+
+/* account panel: language readiness and package self-tests */
+.installed-row.language-row, .installed-row.package-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.language-info, .package-info { display: grid; gap: 2px; min-width: 0; }
+.language-info > span, .package-info > span { overflow-wrap: anywhere; }
+.language-state, .package-state { font-size: 12px; line-height: 1.4; color: var(--ink-dim); }
+.status-ready, .status-ok { color: var(--moss); }
+.status-missing, .status-bad { color: var(--err); }
+.status-preparing, .status-checking, .status-pending, .status-unknown { color: var(--ink-dim); }
+.language-actions { display: flex; flex: none; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.language-actions button { min-height: 30px; padding: 0 10px; border: 1px solid var(--seam); border-radius: 8px; background: var(--raised); color: var(--ink); font-size: 12px; font-weight: 600; }
+.language-actions button:hover:not(:disabled) { border-color: var(--ember); }
+.language-actions .use-language { border-color: var(--ember); background: color-mix(in srgb, var(--ember) 16%, var(--raised)); }

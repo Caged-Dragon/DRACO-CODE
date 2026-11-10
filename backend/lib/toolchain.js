@@ -33,6 +33,13 @@ if [ -n "$need_apt$need_dnf" ]; then
     echo "no apt-get or dnf found"; rc=90
   fi
 fi
+# Extras (best effort, never fail the setup): pip, and the C/C++ libraries an account can add as packages,
+# so adding them later needs no download at run time.
+if command -v apt-get >/dev/null; then
+  apt-get install -y --no-install-recommends python3-pip libsqlite3-dev libssl-dev libcurl4-openssl-dev nlohmann-json3-dev libboost-dev libeigen3-dev libfmt-dev || true
+elif command -v dnf >/dev/null; then
+  dnf install -y python3-pip sqlite-devel openssl-devel libcurl-devel boost-devel eigen3-devel fmt-devel json-devel || dnf install -y python3-pip sqlite-devel openssl-devel libcurl-devel || true
+fi
 echo "$rc" > .draco/install.code
 chmod -R a+rwX .draco 2>/dev/null
 `;

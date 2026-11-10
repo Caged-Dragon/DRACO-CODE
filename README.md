@@ -107,3 +107,12 @@ The site logo is `frontend/assets/draco-code-logo.png` (top bar, menu, sign-in d
 - **Keyboard shortcuts** (`?`) and **About** dialogs.
 - **Terminal Copy** button.
 - **Project mode**: search across files (Ctrl/Cmd+Shift+F), download the project as a `.zip`, upload files (button or drag and drop).
+
+
+## Using new languages and packages (update)
+
+- **Switching language never leaves foreign code behind.** Picking Java on an untouched Python starter gives a Java starter; if you have written code, a new Java program opens and your Python program is kept.
+- **Account panel:** each language shows whether it is ready and has a one-click **Use Java** button; each package shows **Works** or the real reason it failed, and has a **Test** button (it is tested automatically when added). A package that cannot be installed never stops a run.
+- **First use of Java / C / C++:** if the backend's compiler snapshot has never been built, the backend now starts the one-time setup by itself when a user first needs it (or adds the language). The page shows progress and runs the program automatically when it is ready. Opening `/setup` by hand is no longer required.
+- **Backend:** `POST /packages/check` (sign-in required, rate limited, uses the run quota) tests one package. Installs are best-effort: `pip` is bootstrapped if missing, C/C++ libraries work on `apt` and `dnf` images and are skipped if already in the snapshot, and failures report the actual error line.
+- **Accessibility:** zero axe-core violations (WCAG 2.2 AA) over every main screen in both themes; skip link, page heading and landmarks, keyboard-operable editor tabs, high-contrast tokens (`html[data-contrast="high"]`), reduced-motion and forced-colours support (`frontend/app/a11y.css`).

@@ -145,6 +145,24 @@
       }
     }
 
+    // First use of Java / C / C++: the backend prepares the compilers by itself (about 5 minutes, once).
+    // Follow its progress here, then start the program automatically.
+    async function watchSetup(p, token) {
+      var t0 = Date.now(), note = sys('', 'boot'), failures = 0;
+      status('warning', 'Preparing\u2026');
+      while (token === S.token && Date.now() - t0 < 15 * 60000) {
+        await new Promise(function (resolve) { setTimeout(resolve, 6000); });
+        if (token !== S.token) return;
+        var j;
+        try { j = await (await fetch(p.backendUrl + '/setup/status', { cache: 'no-store', signal: AbortSignal.timeout(20000) })).json(); failures = 0; }
+        catch (e) { if (++failures > 6) break; continue; }
+        if (j.state === 'done') { note.remove(); sys('[Ready! Starting your program\u2026]\n', 'prompt'); return run(Object.assign({}, p, { autoRetry: false })); }
+        if (j.state === 'failed') { note.textContent = ''; sys('[The compiler setup failed' + (j.message ? ': ' + j.message : '') + '. Open ' + p.backendUrl + '/setup for details.]\n', 'err'); status('error', 'Setup failed'); return; }
+        var mins = (Date.now() - t0) / 60000; note.textContent = 'Still preparing\u2026 ' + mins.toFixed(1) + ' min so far (usually about 5)\n';
+      }
+      if (token === S.token) { note.textContent = ''; sys('[This is taking longer than expected. Press Run again in a minute, or open ' + p.backendUrl + '/setup.]\n', 'warn'); status('warning', 'Still preparing'); }
+    }
+
     // p: { backendUrl, headers, body, command, fallback }
     async function run(p) {
       if (S.running) stop(false);
@@ -160,6 +178,12 @@
       if (res.status === 404 && p.fallback) { S.running = false; return p.fallback(); }   // older backend without terminal sessions
       if (res.status !== 200 || (!res.json.session && !res.json.done)) {
         S.running = false; var msg = res.json.error || 'The run could not be started.';
+        if (res.json.code === 'setup') {          // not an error: the compilers are being prepared for the first time
+          sys('[' + msg + ']\n', 'warn');
+          if (opts.onFinish) opts.onFinish({ kind: 'warning', label: 'Preparing', setup: true, text: '' });
+          if (p.autoRetry !== false) watchSetup(p, token);
+          return;
+        }
         sys('[' + msg + ']\n', 'err'); status('error', res.status === 429 ? 'Rate limit' : res.status === 504 ? 'Timed out' : res.status === 503 ? 'Service unavailable' : 'Request failed');
         if (opts.onFinish) opts.onFinish({ kind: 'error', label: 'Request failed', httpStatus: res.status, error: msg, text: '' }); return;
       }

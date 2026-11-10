@@ -15,20 +15,23 @@
   <link rel="stylesheet" href="./app/styles.css">
   <link rel="stylesheet" href="./app/project.css">
   <link rel="stylesheet" href="./app/features.css">
+  <link rel="stylesheet" href="./app/a11y.css">
   <script src="./assets/theme.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4"></script>
   <title>Draco Code — Online Compiler</title>
 </head>
 <body data-mode="compiler">
+  <a class="skip-link" id="skip-link" href="#editor">Skip to the editor</a>
   <div class="app-shell">
     <header class="topbar">
+      <h1 class="sr-only" id="page-title">Draco Code online compiler</h1>
       <div class="topbar-left">
         <button class="icon-button" id="menu-button" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="menu-drawer" title="Menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
         <button class="signin-button" id="signin-button" type="button" title="Sign in or create an account" aria-label="Sign in">
           <span class="signin-avatar" id="signin-avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.6"/><path d="M5 20c.8-3.6 3.8-5.4 7-5.4s6.2 1.8 7 5.4"/></svg></span>
           <span class="signin-label" id="signin-label">Sign in</span>
         </button>
-        <a class="brand" href="./" aria-label="Draco Code home">
+        <a class="brand" href="./">
           <img src="./assets/draco-code-logo-64.png" alt="" width="32" height="32">
           <span class="brand-name">Draco<span>Code</span></span>
           <span class="brand-divider" aria-hidden="true"></span>
@@ -131,7 +134,7 @@
             <label for="stdin-input">PRESET INPUT <span>Optional. Fed to the program as soon as it starts. You can also just type in the terminal.</span></label>
             <textarea id="stdin-input" rows="2" placeholder="Enter input here…" spellcheck="false"></textarea>
           </div>
-          <div class="console-output" id="console-output" aria-live="polite" aria-relevant="additions text">
+          <div class="console-output" id="console-output" tabindex="0" role="region" aria-label="Terminal output" aria-live="polite" aria-relevant="additions text">
             <div class="empty-output"><span class="empty-output-mark">›</span><div><strong>Your terminal is ready</strong><p>Press Run. The program starts here, and when it asks for input you can type right in this window.</p></div></div>
           </div>
           <div class="console-footer"><span class="result-state" id="result-state"><span class="result-dot"></span><span>Idle</span></span><span id="execution-time"></span></div>
@@ -139,7 +142,7 @@
       </section>
     </main>
 
-    <section class="ide" id="project-ide" aria-label="Project mode" hidden>
+    <main class="ide" id="project-ide" aria-label="Project mode" hidden>
       <div class="ide-gate" id="ide-gate" hidden>
         <div class="ide-gate-card">
           <img class="ide-gate-logo" src="./assets/draco-code-logo.png" alt="" width="48" height="48">
@@ -191,7 +194,7 @@
         <div class="ide-main" id="ide-main">
           <div class="seam" aria-hidden="true"></div>
           <div class="ide-tabbar">
-            <div class="ide-tabs" id="ide-tabs" role="tablist" aria-label="Open files"></div>
+            <div class="ide-tabs" id="ide-tabs" role="group" aria-label="Open files"></div>
             <div class="ide-tab-actions">
               <button type="button" id="ide-save" title="Save (Ctrl+S)" aria-label="Save file"><svg viewBox="0 0 24 24"><path d="M5 4.5h11l3 3V19.5H5Z"/><path d="M8 4.5v5h7v-5M8 19.5v-6h8v6"/></svg></button>
               <button type="button" id="ide-run" class="ide-run" title="Run project (Ctrl+Enter)" aria-label="Run project"><svg viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5Z"/></svg></button>
@@ -201,7 +204,7 @@
           <div class="ide-editors" id="ide-editors">
             <div class="ide-welcome" id="ide-welcome"><div><strong>Open a file to start editing</strong><p>Pick a file in the explorer, or create one with the + icon. Changes save to your account automatically.</p></div></div>
           </div>
-          <div class="ide-resizer" id="ide-resizer" role="separator" aria-orientation="horizontal" aria-label="Resize panel" tabindex="0"></div>
+          <div class="ide-resizer" id="ide-resizer" role="separator" aria-orientation="horizontal" aria-label="Resize terminal panel" aria-valuemin="90" aria-valuemax="600" aria-valuenow="240" tabindex="0"></div>
           <section class="ide-panel" id="ide-panel" aria-label="Output panel">
             <div class="ide-panel-head">
               <div class="ide-panel-tabs" role="tablist">
@@ -211,8 +214,8 @@
               </div>
               <div class="ide-panel-actions"><span class="ide-run-meta" id="ide-run-meta"></span><button type="button" id="panel-stop" class="ide-stop" title="Stop the program (Ctrl+C in the terminal)" aria-label="Stop the program" hidden><svg viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/></svg></button><button type="button" id="panel-clear" title="Clear output" aria-label="Clear output"><svg viewBox="0 0 24 24"><path d="M5 7h14M9 7V5h6v2M7 7l1 12h8l1-12"/></svg></button><button type="button" id="panel-toggle" title="Hide panel" aria-label="Hide panel"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button></div>
             </div>
-            <div class="ide-panel-body" id="panel-output" role="tabpanel"><div class="ide-empty">Run the project to start it in this terminal. When it asks for input, type right here.</div></div>
-            <div class="ide-panel-body" id="panel-problems" role="tabpanel" hidden><div class="ide-empty">No problems detected.</div></div>
+            <div class="ide-panel-body" id="panel-output" role="tabpanel" tabindex="0" aria-label="Terminal output"><div class="ide-empty">Run the project to start it in this terminal. When it asks for input, type right here.</div></div>
+            <div class="ide-panel-body" id="panel-problems" role="tabpanel" tabindex="0" aria-label="Problems" hidden><div class="ide-empty">No problems detected.</div></div>
             <div class="ide-panel-body" id="panel-input" role="tabpanel" hidden><label for="ide-stdin" class="sr-only">Standard input</label><textarea id="ide-stdin" placeholder="Optional preset input, fed to the program when it starts…" spellcheck="false"></textarea></div>
           </section>
         </div>
@@ -227,7 +230,7 @@
         <span id="ide-st-lang">Plain text</span>
         <span id="ide-st-conn">Connected</span>
       </footer>
-    </section>
+    </main>
 
     <footer class="app-footer">
       <div class="runtime-list" id="runtime-list" aria-label="Runtime availability">
@@ -276,7 +279,7 @@
     <p class="auth-note">New users are saved in Supabase Auth. If email confirmation is enabled, confirm your address before signing in. Guests can still run Python and JavaScript.</p>
   </div>
 
-  <aside class="account-panel" id="account-panel" aria-label="Account, languages and packages" aria-hidden="true">
+  <aside class="account-panel" id="account-panel" aria-label="Account, languages and packages" aria-hidden="true" inert>
     <div class="account-panel-head"><div><span class="eyebrow">DRACO ACCOUNT</span><h2>Languages & packages</h2></div><button class="icon-button" id="account-panel-close" type="button" aria-label="Close panel">×</button></div>
     <div id="account-guest" class="account-auth">
       <p class="account-copy">Sign in or create an account to unlock Java, C, C++, packages and Project mode.</p>
